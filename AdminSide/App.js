@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, Linking } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from './services/supabase';
+import { supabase, debugConnectivity } from './services/supabase';
 import { AuthProvider } from './services/AuthContext';
 
 // Import screens (ensure imports paths are correct)
@@ -411,6 +411,8 @@ export default function App() {
 
   // 1) Supabase session handling
   useEffect(() => {
+    // Quick connectivity diagnostics on cold start
+    debugConnectivity().catch(() => {});
     const getInitialSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);

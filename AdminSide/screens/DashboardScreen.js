@@ -1096,63 +1096,63 @@ const ContactModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
     }
   };
 
-  const handleSave = () => {
-    if (!content || !content.content) {
-      setFeedbackModal({
-        visible: true,
-        type: "error",
-        message: "No content to save"
-      });
-      return;
-    }
+ const handleSave = () => {
+  if (!content || !content.content) {
+    setFeedbackModal({
+      visible: true,
+      type: "error",
+      message: "No content to save"
+    });
+    return;
+  }
+
+  // Close the modal first, then show confirmation
+  onClose(); // 👈 Close modal first
   
-    // Close the modal first, then show confirmation
-    onClose(); // 👈 Close modal first
-    
-    // Then show confirmation modal after a small delay
-    setTimeout(() => {
-      setActionModalConfig({
-        title: 'Save Changes',
-        message: 'Are you sure you want to save these changes?',
-        loading: saving,
-        onConfirm: async () => {
-          setSaving(true);
-          setActionModalConfig(prev => ({ ...prev, loading: true }));
-          
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-  
-            const { error } = await supabase
-              .from('website_content')
-              .update({
-                content: content.content,
-                updated_at: new Date().toISOString(),
-                updated_by: user?.id
-              })
-              .eq('section', section);
-  
-            if (error) throw error;
-  
-            setFeedbackModal({
-              visible: true,
-              type: "success",
-              message: "Content updated successfully! Changes will appear on your website."
-            });
-            onSave();
-          } catch (err) {
-            console.error('Error saving content:', err);
-            setFeedbackModal({
-              visible: true,
-              type: "error",
-              message: "Failed to save content"
-            });
-          } finally {
-            setSaving(false);
-          }
+  // Then show confirmation modal after a small delay
+  setTimeout(() => {
+    setActionModalConfig({
+      title: 'Save Changes',
+      message: 'Are you sure you want to save these changes?',
+      loading: saving,
+      onConfirm: async () => {
+        setSaving(true);
+        setActionModalConfig(prev => ({ ...prev, loading: true }));
+        
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+
+          const { error } = await supabase
+            .from('website_content')
+            .update({
+              content: content.content,
+              updated_at: new Date().toISOString(),
+              updated_by: user?.id
+            })
+            .eq('section', 'contact'); // 👈 FIXED: Changed from 'section' to 'contact'
+
+          if (error) throw error;
+
+          setFeedbackModal({
+            visible: true,
+            type: "success",
+            message: "Contact information updated successfully! Changes will appear on your website."
+          });
+          onRefresh(); // 👈 FIXED: Changed from onSave() to onRefresh()
+        } catch (err) {
+          console.error('Error saving content:', err);
+          setFeedbackModal({
+            visible: true,
+            type: "error",
+            message: "Failed to save content"
+          });
+        } finally {
+          setSaving(false);
         }
-      });
-    }, 300); // Small delay to ensure modal closes first
-  };
+      }
+    });
+  }, 300); // Small delay to ensure modal closes first
+};
 
   const updateField = (field, value) => {
     setContent(prev => ({

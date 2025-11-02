@@ -2408,24 +2408,56 @@ const FleetSection = ({ onRentClick, onOpenDetails }) => {
       );
     };
 /* ===========================
-   Contact Us - WITH ANIMATION (FADE UP FROM BOTTOM)
+   Contact Us Section - FETCHES FROM SUPABASE
    =========================== */
 const ContactUs = () => {
   const [titleRef, titleVisible] = useScrollAnimation()
   const [mapRef, mapVisible] = useScrollAnimation()
   const [detailsRef, detailsVisible] = useScrollAnimation()
+  const [content, setContent] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchContent = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('website_content')
+          .select('*')
+          .eq('section', 'contact')
+          .single();
+        
+        if (error) throw error;
+        setContent(data.content);
+      } catch (err) {
+        console.error('Error fetching contact content:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchContent();
+  }, []);
+
+  if (loading || !content) return null;
+
+  const socialIcons = {
+    facebook: FaFacebookF,
+    instagram: FaInstagram,
+    twitter: FaTwitter,
+    linkedin: FaLinkedinIn,
+  };
 
   return (
-    <section className="relative mt-10 py-20 px-6 md:px-10 lg:px-20 text-gray-900">
+    <section className="relative py-20 px-6 md:px-10 lg:px-20 text-gray-900">
       <div className="max-w-6xl mx-auto">
         {/* Title */}
         <div 
           ref={titleRef}
           className={`text-center mb-12 animate-on-scroll animate-fade-up ${titleVisible ? 'visible' : ''}`}
         >
-          <h2 className="text-4xl lg:text-5xl font-bold">Contact Us</h2>
+          <h2 className="text-4xl lg:text-5xl font-bold">{content.title}</h2>
           <p className="text-gray-600 mt-4 max-w-2xl mx-auto">
-            We'd love to hear from you. Get in touch for inquiries, bookings, or support — our team is always ready to help.
+            {content.subtitle}
           </p>
         </div>
 
@@ -2438,7 +2470,7 @@ const ContactUs = () => {
           >
             <iframe
               title="Rental Den Location"
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d62808.5234949729!2d123.8665!3d10.3157!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x33a9991b55555555%3A0xaaaaaaaaaaaaaaa!2sCebu%20City!5e0!3m2!1sen!2sph!4v1694700000000!5m2!1sen!2sph"
+              src={content.map_embed}
               width="100%"
               height="400"
               style={{ border: 0, filter: "grayscale(100%)" }}
@@ -2453,9 +2485,9 @@ const ContactUs = () => {
             ref={detailsRef}
             className={`animate-on-scroll animate-fade-up delay-300 ${detailsVisible ? 'visible' : ''}`}
           >
-            <h3 className="text-2xl font-semibold mb-4">Contact Details</h3>
+            <h3 className="text-2xl font-semibold mb-4">{content.details_title}</h3>
             <p className="text-gray-600 mb-8">
-              Here's how you can reach us. Contact us by phone, email, or visit our office — whichever works best for you.
+              {content.details_subtitle}
             </p>
 
             <div className="grid sm:grid-cols-2 gap-6">
@@ -2466,7 +2498,7 @@ const ContactUs = () => {
                 </div>
                 <div>
                   <h4 className="font-semibold">Address</h4>
-                  <p className="text-gray-600 text-sm">Cebu City, Philippines</p>
+                  <p className="text-gray-600 text-sm">{content.address}</p>
                 </div>
               </div>
 
@@ -2477,7 +2509,7 @@ const ContactUs = () => {
                 </div>
                 <div>
                   <h4 className="font-semibold">Mobile</h4>
-                  <p className="text-gray-600 text-sm">+63 900 000 0000</p>
+                  <p className="text-gray-600 text-sm">{content.mobile}</p>
                 </div>
               </div>
 
@@ -2488,7 +2520,7 @@ const ContactUs = () => {
                 </div>
                 <div>
                   <h4 className="font-semibold">Availability</h4>
-                  <p className="text-gray-600 text-sm">Daily 09 am – 05 pm</p>
+                  <p className="text-gray-600 text-sm">{content.availability}</p>
                 </div>
               </div>
 
@@ -2499,7 +2531,7 @@ const ContactUs = () => {
                 </div>
                 <div>
                   <h4 className="font-semibold">Email</h4>
-                  <p className="text-gray-600 text-sm">hello@rentalden.com</p>
+                  <p className="text-gray-600 text-sm">{content.email}</p>
                 </div>
               </div>
             </div>
@@ -2508,30 +2540,31 @@ const ContactUs = () => {
             <div className="mt-10 flex items-center justify-between">
               <h4 className="font-semibold">Social Media:</h4>
               <div className="flex space-x-2">
-                <a
-                  href="https://www.facebook.com/profile.php?id=61572309459200&_rdc=1&_rdr#"
-                  target="_blank"
-                  className="w-7 h-7 flex items-center justify-center rounded-md"
-                  style={{ backgroundColor: "#101010" }}
-                >
-                  <FaFacebookF size={12} className="text-gray-50" />
-                </a>
-                <a
-                  href="#"
-                  className="w-7 h-7 flex items-center justify-center rounded-md"
-                  style={{ backgroundColor: "#101010" }}
-                >
-                  <FaInstagram size={12} className="text-gray-50" />
-                </a>
+                {content.social_media && content.social_media.map((social, index) => {
+  const IconComponent = socialIcons[social.icon] || FaFacebookF;
+  return (
+    <a
+      key={index}
+      href={social.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="w-7 h-7 flex items-center justify-center rounded-md hover:opacity-80 transition-opacity"
+      style={{ backgroundColor: "#101010" }}
+      title={social.platform}
+    >
+      <IconComponent size={12} className="text-gray-50" />
+    </a>
+  );
+})}
+
               </div>
             </div>
           </div>
         </div>
       </div>
     </section>
-  )
-}
-
+  );
+};
 /* ===========================
    Footer
    =========================== */

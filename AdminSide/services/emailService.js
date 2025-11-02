@@ -26,8 +26,8 @@ const resolveEmailServiceBaseUrl = () => {
 
   const host = hostFromExpo || webHost || 'localhost';
 
-  // Allow port override; default to 3002 to match prior setup
-  const port = process.env.EXPO_PUBLIC_EMAIL_SERVICE_PORT || '3002';
+  // Allow port override; default to 80 to match local email-service.js
+  const port = process.env.EXPO_PUBLIC_EMAIL_SERVICE_PORT || '80';
 
   // Special case for Android emulator (not Expo Go on device). Keeping here for completeness.
   const finalHost = Platform.OS === 'android' && host === 'localhost' ? '10.0.2.2' : host;

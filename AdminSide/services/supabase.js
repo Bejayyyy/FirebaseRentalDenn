@@ -39,3 +39,35 @@ export const testSupabaseConnection = async () => {
     return { success: false, error: err.message };
   }
 };
+
+export const debugConnectivity = async () => {
+  const results = { };
+  try {
+    const res = await fetch('https://www.gstatic.com/generate_204', { method: 'GET' });
+    results.internet = res.ok;
+  } catch (e) {
+    results.internet = false;
+    results.internetError = String(e?.message || e);
+  }
+
+  try {
+    const health = await fetch(`${supabaseUrl}/auth/v1/health`, { method: 'GET' });
+    results.supabaseHealth = health.ok;
+    results.supabaseStatus = health.status;
+  } catch (e) {
+    results.supabaseHealth = false;
+    results.supabaseError = String(e?.message || e);
+  }
+
+  try {
+    const { error } = await supabase.auth.getSession();
+    results.authSession = !error;
+    if (error) results.authSessionError = String(error?.message || error);
+  } catch (e) {
+    results.authSession = false;
+    results.authSessionError = String(e?.message || e);
+  }
+
+  console.log('[ConnectivityDebug]', results);
+  return results;
+};
