@@ -29,7 +29,7 @@ const isWeb = Platform.OS === "web"
 // Pagination constants
 const ITEMS_PER_PAGE = 10
 
-export default function VehiclesScreen({ navigation }) {
+export default function VehiclesScreen({ navigation, route }) {
   const [vehicles, setVehicles] = useState([])
   const [vehicleVariants, setVehicleVariants] = useState([])
   const [loading, setLoading] = useState(true)
@@ -218,6 +218,19 @@ export default function VehiclesScreen({ navigation }) {
     setShowTypeFilter(false)
     setShowPriceFilter(false)
   }, [activeFilter])
+
+  // Handle vehicleId parameter from navigation (e.g., when coming from owner profile)
+  useEffect(() => {
+    if (route?.params?.vehicleId && vehicles.length > 0) {
+      const vehicleToShow = vehicles.find(v => v.id === route.params.vehicleId)
+      if (vehicleToShow) {
+        // Navigate to AddVehicle screen to view vehicle details
+        navigation.navigate('AddVehicle', { vehicle: vehicleToShow })
+        // Clear the parameter so it doesn't trigger again
+        navigation.setParams({ vehicleId: undefined })
+      }
+    }
+  }, [route?.params?.vehicleId, vehicles, navigation])
   
   useEffect(() => {
     fetchVehicles()
