@@ -22,6 +22,41 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+const formatDateTime = (value) => {
+  if (!value) return "";
+  return new Date(value).toLocaleString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+  });
+};
+
+const renderContractSection = (bookingData) => {
+  if (!bookingData.contractText) return "";
+
+  const paragraphs = bookingData.contractText
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${paragraph}</p>`)
+    .join("");
+
+  return `
+    <div class="contract-section">
+      <h3>Signed Contract</h3>
+      ${paragraphs}
+      <div class="signature-block">
+        <p><strong>Signed by:</strong> ${bookingData.contractSignedName || "Not provided"}</p>
+        ${
+          bookingData.contractSignedAt
+            ? `<p><strong>Signed on:</strong> ${formatDateTime(bookingData.contractSignedAt)}</p>`
+            : ""
+        }
+      </div>
+    </div>
+  `;
+};
+
 // Email template
 const createBookingConfirmationEmail = (bookingData) => {
   return `
@@ -38,6 +73,10 @@ const createBookingConfirmationEmail = (bookingData) => {
             .booking-details { background: white; padding: 15px; margin: 15px 0; border-radius: 5px; }
             .footer { background: #101010; color: white; padding: 15px; text-align: center; }
             .status-pending { color: #f59e0b; font-weight: bold; }
+            .contract-section { background: #fff7ed; border: 1px solid #fed7aa; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .contract-section h3 { margin-top: 0; color: #b45309; }
+            .contract-section p { margin-bottom: 12px; color: #78350f; }
+            .signature-block { margin-top: 12px; padding-top: 12px; border-top: 1px solid #fed7aa; font-size: 14px; color: #7c2d12; }
         </style>
     </head>
     <body>
@@ -69,6 +108,8 @@ const createBookingConfirmationEmail = (bookingData) => {
                     <li>You will receive a confirmation email once approved</li>
                     <li>Please have your driver's license and ID ready for pickup</li>
                 </ul>
+
+                ${renderContractSection(bookingData)}
                 
                 <p>If you have any questions, please don't hesitate to contact us at:</p>
                 <p>📞 +63 900 000 0000<br>

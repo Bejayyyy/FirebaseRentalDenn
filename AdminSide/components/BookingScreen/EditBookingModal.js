@@ -56,6 +56,9 @@ export default function EditBookingModal({
         gov_id_url: booking.gov_id_url || "",
         vehicle_variant_id: booking.vehicle_variant_id || null,
         vehicle_id: booking.vehicle_id || null,
+        contract_text: booking.contract_text || "",
+        contract_signed_name: booking.contract_signed_name || "",
+        contract_signed_at: booking.contract_signed_at || "",
         created_at: booking.created_at || new Date().toISOString(),
         updated_at: booking.updated_at || new Date().toISOString(),
         // Safely handle nested objects

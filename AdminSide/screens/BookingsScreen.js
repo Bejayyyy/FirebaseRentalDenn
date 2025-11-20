@@ -242,7 +242,10 @@ const handleBookingAdded = async (newBooking) => {
           license_number,
           vehicle_id,
           vehicle_variant_id,
-          gov_id_url, 
+          gov_id_url,
+          contract_text,
+          contract_signed_name,
+          contract_signed_at,
           vehicles (
             make,
             model,
@@ -327,6 +330,9 @@ const handleBookingAdded = async (newBooking) => {
           pickup_location,
           license_number,
           vehicle_id,
+          contract_text,
+          contract_signed_name,
+          contract_signed_at,
           vehicles (
             make,
             model,
@@ -1896,6 +1902,39 @@ const styles = StyleSheet.create({
     color: '#1f2937',
     marginRight: 8,
     flex: 1,
+  },
+  contractCard: {
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+  },
+  contractParagraph: {
+    fontSize: 14,
+    color: '#7c2d12',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  contractMetaRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#fed7aa',
+    marginTop: 12,
+    paddingTop: 12,
+  },
+  contractSignatureLabel: {
+    fontSize: 13,
+    color: '#9a3412',
+  },
+  contractSignatureValue: {
+    fontWeight: '600',
+    color: '#7c2d12',
+  },
+  contractMetaText: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 4,
   },
   // Enhanced Dropdown Styles
   enhancedDropdownOverlay: {

@@ -287,6 +287,16 @@ export default function BookingForm({
   }
 
   const rentalDays = calculateRentalDays();
+  const formatSignedAt = (value) => {
+    if (!value) return "";
+    return new Date(value).toLocaleString(undefined, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+    });
+  };
 
   return (
     <View>
@@ -670,6 +680,37 @@ export default function BookingForm({
             </View>
           )}
         </View>
+
+        {booking.contract_text?.trim()?.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="document-text-outline" size={20} color="black" />
+              <Text style={styles.sectionTitle}>Signed Contract</Text>
+            </View>
+
+            <View style={styles.contractCard}>
+              {booking.contract_text.split(/\n{2,}/).map((paragraph, idx) => (
+                <Text key={`contract-paragraph-${idx}`} style={styles.contractParagraph}>
+                  {paragraph}
+                </Text>
+              ))}
+
+              <View style={styles.contractMetaRow}>
+                <Text style={styles.contractSignatureLabel}>
+                  Signed by{" "}
+                  <Text style={styles.contractSignatureValue}>
+                    {booking.contract_signed_name || "Customer"}
+                  </Text>
+                </Text>
+                {booking.contract_signed_at ? (
+                  <Text style={styles.contractMetaText}>
+                    {formatSignedAt(booking.contract_signed_at)}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Status (Edit only) */}
         {isEdit && (

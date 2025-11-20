@@ -471,10 +471,21 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
   const [toast, setToast] = useState({ type: "", message: "", isVisible: false });
   const [variantsLoading, setVariantsLoading] = useState(false);
   const [bookedDates, setBookedDates] = useState([]);
+  const [contractModalVisible, setContractModalVisible] = useState(false);
+  const [contractSignature, setContractSignature] = useState("");
+  const [contractError, setContractError] = useState("");
 
   useEffect(() => {
     document.body.style.overflow = isOpen ? "hidden" : "auto";
     return () => (document.body.style.overflow = "auto");
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setContractModalVisible(false);
+      setContractSignature("");
+      setContractError("");
+    }
   }, [isOpen]);
 
   // Fetch booked dates for the selected variant
@@ -575,6 +586,77 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
   const showToast = (type, message) => setToast({ type, message, isVisible: true });
   const hideToast = () => setToast((t) => ({ ...t, isVisible: false }));
 
+  const normalizeName = (value = "") => value.replace(/\s+/g, " ").trim().toLowerCase();
+
+  const formatContractDate = (value) => {
+    if (!value) return "";
+    return new Date(value).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  };
+
+  const getVehicleSummary = () => {
+    const parts = [
+      selectedCar?.year,
+      selectedCar?.make,
+      selectedCar?.model,
+    ].filter(Boolean);
+    const base = parts.join(" ") || "Selected vehicle";
+    const color = selectedVariant?.color ? ` (${selectedVariant.color})` : "";
+    return `${base}${color}`;
+  };
+
+  const buildContractDetails = (signedAtISO) => {
+    const customerName = formData.fullName.trim();
+    const rentalStart = formatContractDate(formData.pickupDate);
+    const rentalEnd = formatContractDate(formData.returnDate);
+    const signatureDate = formatContractDate(signedAtISO);
+    const vehicleSummary = getVehicleSummary();
+
+    const contractParagraphs = [
+      `I, ${customerName}, confirm that I am renting ${vehicleSummary} from The Rental Den for the period of ${rentalStart} to ${rentalEnd}.`,
+      "I accept full financial responsibility for any loss, collision damage, vandalism, or civil penalties incurred during this rental period, apart from normal wear and tear.",
+      "I agree to immediately report any incident to The Rental Den, to cooperate with insurance requirements, and to settle any repair or downtime costs that are not covered by insurance or security deposits.",
+      `By typing my full legal name, I agree that this serves as my digital signature dated ${signatureDate}.`,
+    ];
+
+    return {
+      text: contractParagraphs.join("\n\n"),
+      signedName: customerName,
+      signedAt: signedAtISO,
+    };
+  };
+
+  const validateBookingForm = () => {
+    if (!formData.vehicleVariantId) {
+      return "Please select a color variant.";
+    }
+    if (!govIdFile) {
+      return "Please upload a valid Driver's License Card image.";
+    }
+    if (!formData.pickupDate || !formData.returnDate) {
+      return "Please set a valid rental date range.";
+    }
+
+    const start = new Date(formData.pickupDate);
+    const end = new Date(formData.returnDate);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+      return "Please set a valid rental date range.";
+    }
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = new Date(d).toISOString().split("T")[0];
+      if (isDateBooked(dateStr)) {
+        return "Selected dates are already booked. Please choose different dates.";
+      }
+    }
+
+    return null;
+  };
+
   const handleInputChange = (e) => setFormData((s) => ({ ...s, [e.target.name]: e.target.value }));
 
   // FIXED: Select first available variant of chosen color
@@ -605,41 +687,23 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
     return bookedDates.includes(dateString);
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     if (isSubmitting) return;
+    const validationError = validateBookingForm();
+    if (validationError) {
+      showToast("error", validationError);
+      return;
+    }
+    setContractSignature("");
+    setContractError("");
+    setContractModalVisible(true);
+  };
+
+  const submitBooking = async (contractDetails) => {
     setIsSubmitting(true);
 
     try {
-      if (!formData.vehicleVariantId) {
-        showToast("error", "Please select a color variant.");
-        setIsSubmitting(false);
-        return;
-      }
-      if (!govIdFile) {
-        showToast("error", "Please upload a valid Driver's License Card image.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      const start = new Date(formData.pickupDate);
-      const end = new Date(formData.returnDate);
-      if (!(formData.pickupDate && formData.returnDate) || end < start) {
-        showToast("error", "Please set a valid rental date range.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Check if any date in range is booked
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = new Date(d).toISOString().split('T')[0];
-        if (isDateBooked(dateStr)) {
-          showToast("error", "Selected dates are already booked. Please choose different dates.");
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
       const fileName = `${Date.now()}_${govIdFile.name}`;
       const { error: uploadError } = await supabase.storage.from("gov_ids").upload(fileName, govIdFile);
       if (uploadError) throw uploadError;
@@ -659,6 +723,9 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
         total_price: totalPrice,
         gov_id_url: govIdUrl,
         status: "pending",
+        contract_text: contractDetails?.text || null,
+        contract_signed_name: contractDetails?.signedName || null,
+        contract_signed_at: contractDetails?.signedAt || null,
       };
 
       const { data: insertedBooking, error: insertError } = await supabase
@@ -681,7 +748,11 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
           rental_start_date: formData.pickupDate,
           rental_end_date: formData.returnDate,
           pickup_location: formData.pickupLocation,
-          total_price: totalPrice
+          total_price: totalPrice,
+          contractText: contractDetails?.text,
+          contractSignedName: contractDetails?.signedName,
+          contractSignedAt: contractDetails?.signedAt,
+          contractVehicleSummary: getVehicleSummary(),
         };
 
         const emailResponse = await fetch('http://localhost:3001/api/send-booking-email', {
@@ -714,6 +785,39 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleContractConfirm = async () => {
+    if (isSubmitting) return;
+    const validationError = validateBookingForm();
+    if (validationError) {
+      showToast("error", validationError);
+      setContractError(validationError);
+      return;
+    }
+
+    if (!contractSignature.trim()) {
+      setContractError("Please type your full name to sign the contract.");
+      return;
+    }
+
+    if (normalizeName(contractSignature) !== normalizeName(formData.fullName)) {
+      setContractError("The name you entered must exactly match your full name on the form.");
+      return;
+    }
+
+    const signedAtISO = new Date().toISOString();
+    const contractDetails = buildContractDetails(signedAtISO);
+    setContractModalVisible(false);
+    setContractError("");
+    await submitBooking(contractDetails);
+  };
+
+  const handleContractClose = () => {
+    if (isSubmitting) return;
+    setContractModalVisible(false);
+    setContractSignature("");
+    setContractError("");
   };
 
   const getColorHex = (colorName) => {
@@ -1055,6 +1159,81 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
           </div>
         </div>
       </div>
+      {contractModalVisible && (
+        <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl p-8 relative">
+            <button
+              type="button"
+              onClick={handleContractClose}
+              className="absolute top-4 right-4 w-10 h-10 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center hover:bg-gray-200 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="space-y-4 pr-6">
+              <p className="text-sm text-gray-600">
+                Before we submit your booking, please review and sign our rental damage responsibility agreement.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-900 mb-2">Rental Summary</h4>
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Vehicle:</span> {getVehicleSummary()}
+                </p>
+                <p className="text-sm text-gray-700">
+                  <span className="font-medium">Rental Period:</span>{" "}
+                  {formatContractDate(formData.pickupDate)} – {formatContractDate(formData.returnDate)}
+                </p>
+              </div>
+
+              <div className="bg-white">
+                <h4 className="font-semibold text-gray-900 mb-2">Contract</h4>
+                <ul className="list-disc pl-5 text-sm text-gray-700 space-y-2">
+                  <li>You accept full financial responsibility for any damage, loss, theft, or violations during your rental period.</li>
+                  <li>You agree to notify The Rental Den immediately if an incident happens and to cooperate with any insurance requirements.</li>
+                  <li>You agree to cover repair, downtime, and administrative costs that are not covered by insurance.</li>
+                  <li>Typing your full name below serves as your legally binding digital signature.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Type your full name to sign
+                </label>
+                <input
+                  type="text"
+                  value={contractSignature}
+                  onChange={(e) => setContractSignature(e.target.value)}
+                  placeholder={formData.fullName || "Enter your full name"}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-black focus:border-black transition-all duration-200 bg-white"
+                />
+                {contractError && (
+                  <p className="text-sm text-red-600 mt-2">{contractError}</p>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleContractClose}
+                  className="px-5 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-all"
+                >
+                  Review Form
+                </button>
+                <button
+                  type="button"
+                  onClick={handleContractConfirm}
+                  disabled={isSubmitting}
+                  className={`px-5 py-3 rounded-xl text-white font-semibold transition-all ${
+                    isSubmitting ? "bg-gray-400 cursor-not-allowed" : "bg-black hover:bg-gray-800"
+                  }`}
+                >
+                  {isSubmitting ? "Submitting..." : "Sign & Submit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
