@@ -10,7 +10,7 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { supabase } from "../services/supabase";
+import { firebaseAuth } from "../services/firebaseService";
 
 export default function ResetPasswordScreen({ navigation }) {
   const [newPassword, setNewPassword] = useState("");
@@ -35,21 +35,13 @@ export default function ResetPasswordScreen({ navigation }) {
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) {
-        console.error("Reset error:", error.message);
-        Alert.alert("Reset Failed", error.message);
-      } else {
-        Alert.alert("Success", "Your password has been updated.", [
-          {
-            text: "OK",
-            onPress: () => navigation.replace("Login"), // back to login
-          },
-        ]);
-      }
+      await firebaseAuth.updatePassword(newPassword);
+      Alert.alert("Success", "Your password has been updated.", [
+        {
+          text: "OK",
+          onPress: () => navigation.replace("Login"),
+        },
+      ]);
     } catch (err) {
       console.error("Unexpected reset error:", err);
       Alert.alert("Error", "Unexpected error. Please try again.");

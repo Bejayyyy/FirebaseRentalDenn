@@ -13,7 +13,7 @@ import {
   Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabase';
+import { firebaseAuth } from '../services/firebaseService';
 import NetInfo from '@react-native-community/netinfo';
 
 const { height } = Dimensions.get('window');
@@ -40,23 +40,22 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email.trim(),
-        password: formData.password,
-      });
-
-      if (error) {
-        let errorMessage = 'Login failed. Please try again.';
-        if (error.message.includes('Invalid login credentials')) {
-          errorMessage = 'Invalid email or password.';
-        }
-        Alert.alert('Login Error', errorMessage);
-      } else if (data?.user) {
-        console.log('Login success:', data.user);
+      const cred = await firebaseAuth.signInWithPassword(
+        formData.email.trim(),
+        formData.password,
+      );
+      if (cred?.user) {
+        console.log('Login success:', cred.user);
         // Auth state listener in App.js will redirect
       }
     } catch (err) {
-      Alert.alert('Error', 'Unexpected error. Please try again.');
+      let errorMessage = 'Login failed. Please try again.';
+      if (err?.message?.includes('auth/invalid-credential') || err?.message?.includes('Invalid login credentials')) {
+        errorMessage = 'Invalid email or password.';
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+      Alert.alert('Login Error', errorMessage);
       console.error(err);
     } finally {
       setLoading(false);
@@ -78,22 +77,11 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        formData.email.trim(),
-        {
-          redirectTo: 'adminside://reset-password', // deep link
-        }
+      await firebaseAuth.resetPasswordForEmail(formData.email.trim());
+      Alert.alert(
+        'Reset Link Sent',
+        `A password reset link has been sent to ${formData.email}. Check your inbox.`
       );
-
-      if (error) {
-        console.error('Reset error:', error.message);
-        Alert.alert('Reset Failed', error.message);
-      } else {
-        Alert.alert(
-          'Reset Link Sent',
-          `A password reset link has been sent to ${formData.email}. Check your inbox.`
-        );
-      }
     } catch (err) {
       Alert.alert('Error', 'Unexpected error occurred.');
       console.error(err);

@@ -1,7 +1,7 @@
 import React from "react"
 import { View, Text, TouchableOpacity, Modal, StyleSheet } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { supabase } from "../lib/supabase" // adjust path if needed
+import { vehiclesService } from "../../services/firebaseService"
 
 export default function DeleteVehicleModal({
   visible,
@@ -16,20 +16,10 @@ export default function DeleteVehicleModal({
 
     setDeleting(true)
     try {
-      const { error } = await supabase
-        .from("vehicles")
-        .delete()
-        .eq("id", vehicle.id)
-
-      if (error) {
-        console.error("Error deleting vehicle:", error)
-        alert("Failed to delete vehicle")
-        return
-      }
-
+      await vehiclesService.delete(vehicle.id)
       alert("Vehicle deleted successfully")
       onClose()
-      if (onDeleted) onDeleted(vehicle.id) // callback if parent wants refresh
+      if (onDeleted) onDeleted(vehicle.id)
     } catch (error) {
       console.error("Error in confirmDeleteVehicle:", error)
       alert("Failed to delete vehicle")

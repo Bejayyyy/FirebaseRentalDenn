@@ -20,7 +20,7 @@ import {
 import { Ionicons } from "@expo/vector-icons"
 import { SafeAreaView } from "react-native-safe-area-context"
 import background from "../assets/background.jpg"
-import { supabase } from '../services/supabase'
+import { vehiclesService, variantsService, bookingsService } from '../services/firebaseService'
 import ActionModal from "../components/AlertModal/ActionModal"
 
 const { width } = Dimensions.get("window")
@@ -237,72 +237,29 @@ export default function VehiclesScreen({ navigation, route }) {
     fetchVehicleVariants()
     fetchBookings()
 
-    // Set up real-time subscriptions
-    const vehiclesSubscription = supabase
-      .channel('vehicles-channel')
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'vehicles' 
-        }, 
-        (payload) => {
-          console.log('Vehicle change:', payload)
-          fetchVehicles()
-        }
-      )
-      .subscribe()
-
-    const variantsSubscription = supabase
-      .channel('variants-channel')
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'vehicle_variants' 
-        }, 
-        (payload) => {
-          console.log('Variant change:', payload)
-          fetchVehicleVariants()
-        }
-      )
-      .subscribe()
-
-    const bookingsSubscription = supabase
-      .channel('bookings-channel')
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'bookings' 
-        }, 
-        (payload) => {
-          console.log('Booking change:', payload)
-          fetchBookings()
-        }
-      )
-      .subscribe()
+    const unsubV = vehiclesService.subscribe(
+      (data) => { setVehicles(data); setLoading(false); },
+      (err) => { console.error('Vehicles subscription error:', err); setLoading(false); }
+    )
+    const unsubVar = variantsService.subscribe(
+      (data) => setVehicleVariants(data),
+      (err) => console.error('Variants subscription error:', err)
+    )
+    const unsubB = bookingsService.subscribe(
+      (data) => setBookings(data),
+      (err) => console.error('Bookings subscription error:', err)
+    )
 
     return () => {
-      vehiclesSubscription.unsubscribe()
-      variantsSubscription.unsubscribe()
-      bookingsSubscription.unsubscribe()
+      unsubV()
+      unsubVar()
+      unsubB()
     }
   }, [])
   
   const fetchVehicles = async () => {
     try {
-      const { data: vehiclesData, error } = await supabase
-        .from('vehicles')
-        .select('*') // This already includes type, seats, price_per_day
-        .order('created_at', { ascending: false })
-  
-      if (error) {
-        console.error('Error fetching vehicles:', error)
-        Alert.alert('Error', 'Failed to fetch vehicles')
-        return
-      }
-  
+      const vehiclesData = await vehiclesService.list()
       setVehicles(vehiclesData || [])
     } catch (error) {
       console.error('Error in fetchVehicles:', error)
@@ -314,16 +271,7 @@ export default function VehiclesScreen({ navigation, route }) {
 
   const fetchVehicleVariants = async () => {
     try {
-      const { data: variantsData, error } = await supabase
-        .from('vehicle_variants')
-        .select('*')
-        .order('color', { ascending: true })
-
-      if (error) {
-        console.error('Error fetching vehicle variants:', error)
-        return
-      }
-
+      const variantsData = await variantsService.list()
       setVehicleVariants(variantsData || [])
     } catch (error) {
       console.error('Error in fetchVehicleVariants:', error)
@@ -332,16 +280,7 @@ export default function VehiclesScreen({ navigation, route }) {
 
   const fetchBookings = async () => {
     try {
-      const { data: bookingsData, error } = await supabase
-        .from('bookings')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) {
-        console.error('Error fetching bookings:', error)
-        return
-      }
-
+      const bookingsData = await bookingsService.list()
       setBookings(bookingsData || [])
     } catch (error) {
       console.error('Error in fetchBookings:', error)
@@ -441,23 +380,7 @@ export default function VehiclesScreen({ navigation, route }) {
     setDeleting(true)
     
     try {
-      // Delete vehicle (variants will be deleted automatically due to cascade)
-      const { error } = await supabase
-        .from('vehicles')
-        .delete()
-        .eq('id', vehicleToDelete.id)
-
-      if (error) {
-        console.error('Error deleting vehicle:', error)
-        setFeedbackModal({
-          visible: true,
-          type: "error",
-          message: "Failed to delete vehicle"
-        })
-        Alert.alert("Error", "Failed to delete vehicle")
-        return
-      }
-
+      await vehiclesService.delete(vehicleToDelete.id)
       setFeedbackModal({
         visible: true,
         type: "success",

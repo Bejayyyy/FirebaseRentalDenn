@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from "react-native-svg";
-import { supabase } from "../services/supabase";
+import { bookingsService } from "../services/firebaseService";
 
 // screen width for scaling
 const { width } = Dimensions.get("window");
@@ -109,21 +109,15 @@ export default function BookingOverviewChart() {
         endDate = new Date(selectedYear, 11, 31);
       }
 
-      // Query bookings from Supabase with status filter
-      let query = supabase
-        .from("bookings")
-        .select("*")
-        .gte("rental_start_date", startDate.toISOString().split("T")[0])
-        .lte("rental_start_date", endDate.toISOString().split("T")[0]);
-
-      // Apply status filter if not "all"
+      const allBookings = await bookingsService.list();
+      let data = allBookings.filter(
+        (b) =>
+          b.rental_start_date >= startDate.toISOString().split("T")[0] &&
+          b.rental_start_date <= endDate.toISOString().split("T")[0]
+      );
       if (selectedStatus !== "all") {
-        query = query.eq("status", selectedStatus);
+        data = data.filter((b) => b.status === selectedStatus);
       }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
 
       // Group bookings by filter
       let grouped = [];

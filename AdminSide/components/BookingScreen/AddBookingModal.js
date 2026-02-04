@@ -14,7 +14,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import ActionModal from "../AlertModal/ActionModal";
 import BookingForm from "./BookingForm";
-import { supabase } from "../../services/supabase";
+import { bookingsService, variantsService } from "../../services/firebaseService";
 
 export default function AddBookingModal({
   visible,
@@ -143,73 +143,30 @@ export default function AddBookingModal({
   const handleConfirmSave = async () => {
     setLoading(true);
     try {
-      // Insert booking into database
-      const { data, error } = await supabase
-        .from('bookings')
-        .insert({
-          customer_name: newBooking.customer_name,
-          customer_email: newBooking.customer_email,
-          customer_phone: newBooking.customer_phone,
-          rental_start_date: newBooking.rental_start_date,
-          rental_end_date: newBooking.rental_end_date,
-          total_price: parseFloat(newBooking.total_price),
-          pickup_location: newBooking.pickup_location || "",
-          license_number: newBooking.license_number,
-          vehicle_id: newBooking.vehicle_id,
-          vehicle_variant_id: newBooking.vehicle_variant_id,
-          gov_id_url: newBooking.gov_id_url,
-          status: newBooking.status,
-          created_at: new Date().toISOString(),
-        })
-        .select(`
-          id,
-          customer_name,
-          customer_email,
-          customer_phone,
-          rental_start_date,
-          rental_end_date,
-          total_price,
-          status,
-          created_at,
-          pickup_location,
-          license_number,
-          vehicle_id,
-          vehicle_variant_id,
-          gov_id_url,
-          vehicles (
-            make,
-            model,
-            year
-          ),
-          vehicle_variants (
-            color,
-            available_quantity,
-            total_quantity
-          )
-        `)
-        .single();
+      const { id } = await bookingsService.add({
+        customer_name: newBooking.customer_name,
+        customer_email: newBooking.customer_email,
+        customer_phone: newBooking.customer_phone,
+        rental_start_date: newBooking.rental_start_date,
+        rental_end_date: newBooking.rental_end_date,
+        total_price: parseFloat(newBooking.total_price),
+        pickup_location: newBooking.pickup_location || "",
+        license_number: newBooking.license_number,
+        vehicle_id: newBooking.vehicle_id,
+        vehicle_variant_id: newBooking.vehicle_variant_id,
+        gov_id_url: newBooking.gov_id_url,
+        status: newBooking.status,
+      });
 
-      if (error) {
-        console.error('Add booking error:', error);
-        setErrorMessage('Failed to add booking');
-        setShowErrorModal(true);
-        return;
-      }
-
-      // Update vehicle availability if booking is confirmed
       if (newBooking.status === 'confirmed') {
-        const { error: updateError } = await supabase.rpc('adjust_variant_quantity', {
-          variant_id: newBooking.vehicle_variant_id,
-          change: -1
-        });
-
-        if (updateError) {
-          console.error('Error updating vehicle availability:', updateError);
-          // Still show success since booking was created
+        try {
+          await variantsService.adjustQuantity(newBooking.vehicle_variant_id, -1);
+        } catch (e) {
+          console.error('Error updating vehicle availability:', e);
         }
       }
 
-      // Callback to parent to refresh data
+      const data = { id, ...newBooking };
       if (onBookingAdded) {
         await onBookingAdded(data);
       }

@@ -14,7 +14,7 @@ import {
   Animated
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabase';
+import { carOwnersService, variantsService, bookingsService } from '../services/firebaseService';
 import ActionModal from '../components/AlertModal/ActionModal';
 
 export default function CarOwnersScreen({ navigation }) {
@@ -44,36 +44,9 @@ export default function CarOwnersScreen({ navigation }) {
 
   useEffect(() => {
     fetchOwners();
-    
-    // Real-time subscriptions for multiple tables
-    const ownersSubscription = supabase
-      .channel('owners-channel')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'car_owners' }, 
-        () => {
-          console.log('Car owners changed, refreshing...');
-          fetchOwners();
-        }
-      )
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'bookings' }, 
-        () => {
-          console.log('Bookings changed, refreshing...');
-          fetchOwners();
-        }
-      )
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'vehicle_variants' }, 
-        () => {
-          console.log('Vehicle variants changed, refreshing...');
-          fetchOwners();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(ownersSubscription);
-    };
+    const unsubO = carOwnersService.subscribe(() => fetchOwners(), () => {});
+    const unsubB = bookingsService.subscribe(() => fetchOwners(), () => {});
+    return () => { unsubO(); unsubB(); };
   }, []);
 
   useEffect(() => {
@@ -82,39 +55,17 @@ export default function CarOwnersScreen({ navigation }) {
 
   const fetchOwners = async () => {
     try {
-      // Fetch owners
-      const { data: ownersData, error: ownersError } = await supabase
-        .from('car_owners')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const ownersData = await carOwnersService.listAll();
 
-      if (ownersError) throw ownersError;
-
-      // For each owner, fetch their vehicle variants and bookings
       const ownersWithStats = await Promise.all(
         ownersData.map(async (owner) => {
-          // Get vehicle variants for this owner
-          const { data: variants, error: variantsError } = await supabase
-            .from('vehicle_variants')
-            .select('id')
-            .eq('owner_id', owner.id);
-
-          const variantIds = variants?.map(v => v.id) || [];
+          const variants = await variantsService.listByOwnerId(owner.id);
+          const variantIds = variants?.map((v) => v.id) || [];
           const vehiclesCount = variants?.length || 0;
 
-          console.log(`Owner: ${owner.name}, Variant IDs:`, variantIds);
-
-          // Get bookings for these vehicle variants
           let bookings = [];
           if (variantIds.length > 0) {
-            const { data: bookingsData, error: bookingsError } = await supabase
-              .from('bookings')
-              .select('total_price, status, vehicle_variant_id')
-              .in('vehicle_variant_id', variantIds);
-
-            bookings = bookingsData || [];
-            console.log(`Owner: ${owner.name}, Total bookings:`, bookings.length);
-            console.log(`Owner: ${owner.name}, Bookings data:`, bookings);
+            bookings = await bookingsService.listByVariantIds(variantIds);
           }
 
           // Calculate earnings and stats
@@ -188,19 +139,12 @@ export default function CarOwnersScreen({ navigation }) {
 
   const addNewOwner = async () => {
     try {
-      const { data, error } = await supabase
-        .from('car_owners')
-        .insert({
-          name: formData.name.trim(),
-          email: formData.email.trim(),
-          phone: formData.phone.trim(),
-          status: 'active',
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      await carOwnersService.add({
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        status: 'active',
+      });
 
       setFeedbackModal({
         visible: true,
@@ -253,12 +197,7 @@ export default function CarOwnersScreen({ navigation }) {
         return;
       }
 
-      const { error } = await supabase
-        .from('car_owners')
-        .delete()
-        .eq('id', selectedOwner.id);
-
-      if (error) throw error;
+      await carOwnersService.delete(selectedOwner.id);
 
       setFeedbackModal({
         visible: true,

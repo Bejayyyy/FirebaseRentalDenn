@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Rect, Text as SvgText } from "react-native-svg";
-import { supabase } from "../../services/supabase";
+import { bookingsService } from "../../services/firebaseService";
 
 const { width } = Dimensions.get("window");
 
@@ -55,21 +55,12 @@ export default function VehicleAnalyticsChart() {
         endDate = new Date(selectedYear, 11, 31);
       }
 
-      const { data, error } = await supabase
-        .from("bookings")
-        .select(`
-          *,
-          vehicles (
-            make,
-            model,
-            year,
-            image_url
-          )
-        `)
-        .gte("rental_start_date", startDate.toISOString().split("T")[0])
-        .lte("rental_start_date", endDate.toISOString().split("T")[0]);
-
-      if (error) throw error;
+      const allBookings = await bookingsService.listWithDetails();
+      const data = allBookings.filter(
+        (b) =>
+          b.rental_start_date >= startDate.toISOString().split("T")[0] &&
+          b.rental_start_date <= endDate.toISOString().split("T")[0]
+      );
 
       // Group by vehicle
       const vehicleBookings = data.reduce((acc, booking) => {

@@ -13,7 +13,7 @@ import {
   Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabase';
+import { vehiclesService, variantsService, bookingsService } from '../services/firebaseService';
 
 const { width } = Dimensions.get('window');
 const CELL_SIZE = (width - 40) / 7;
@@ -57,39 +57,9 @@ export default function CalendarComponent({
     fetchVehicleVariants();
     fetchBookings();
     
-    const subscription = supabase
-      .channel('bookings-calendar-channel')
-      .on('postgres_changes', 
-        { 
-          event: '*', // Listens to INSERT, UPDATE, and DELETE
-          schema: 'public', 
-          table: 'bookings' 
-        }, 
-        (payload) => {
-          console.log('Booking change detected:', payload.eventType, payload);
-          
-          // Handle different event types
-          switch(payload.eventType) {
-            case 'INSERT':
-              console.log('New booking added');
-              break;
-            case 'UPDATE':
-              console.log('Booking updated');
-              break;
-            case 'DELETE':
-              console.log('Booking deleted:', payload.old);
-              break;
-          }
-          
-          // Refresh bookings data for any change
-          fetchBookings();
-        }
-      )
-      .subscribe();
+    const unsub = bookingsService.subscribe(() => fetchBookings(), () => {});
 
-    return () => {
-      supabase.removeChannel(subscription);
-    };
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -100,17 +70,8 @@ export default function CalendarComponent({
 
   const fetchVehicles = async () => {
     try {
-      const { data: vehiclesData, error } = await supabase
-        .from('vehicles')
-        .select('*')
-        .order('make', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching vehicles:', error);
-        return;
-      }
-
-      setVehicles(vehiclesData || []);
+      const vehiclesData = await vehiclesService.list();
+      setVehicles((vehiclesData || []).sort((a, b) => (a.make || '').localeCompare(b.make || '')));
     } catch (error) {
       console.error('Error processing vehicles:', error);
     }
@@ -118,24 +79,11 @@ export default function CalendarComponent({
 
   const fetchVehicleVariants = async () => {
     try {
-      const { data: variantsData, error } = await supabase
-        .from('vehicle_variants')
-        .select(`
-          *,
-          vehicles (
-            make,
-            model,
-            year
-          )
-        `)
-        .order('vehicle_id', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching vehicle variants:', error);
-        return;
-      }
-
-      setVehicleVariants(variantsData || []);
+      const variantsData = await variantsService.list();
+      const vehicles = await vehiclesService.list();
+      const vehiclesMap = Object.fromEntries(vehicles.map((v) => [v.id, v]));
+      const withVehicles = (variantsData || []).map((v) => ({ ...v, vehicles: vehiclesMap[v.vehicle_id] || null }));
+      setVehicleVariants(withVehicles);
     } catch (error) {
       console.error('Error processing vehicle variants:', error);
     }
@@ -168,37 +116,13 @@ export default function CalendarComponent({
     try {
       setLoading(true);
       
-      let query = supabase
-        .from('bookings')
-        .select(`
-          *,
-          vehicles (
-            make,
-            model,
-            year,
-            image_url
-          ),
-          vehicle_variants (
-            color,
-            plate_number,
-            image_url
-          )
-        `);
-      
+      let bookingsData = await bookingsService.listWithDetails();
       if (selectedVariant) {
-        query = query.eq('vehicle_variant_id', selectedVariant);
+        bookingsData = bookingsData.filter((b) => b.vehicle_variant_id === selectedVariant);
       }
-      
-      const { data: bookingsData, error } = await query
-        .order('rental_start_date', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching bookings:', error);
-        Alert.alert('Error', 'Failed to fetch bookings data');
-        setBookings({});
-        setBookingStats({ pending: 0, confirmed: 0, completed: 0, cancelled: 0, declined: 0, total: 0 }); // ✅ ADD THIS
-        return;
-      }
+      bookingsData = bookingsData.sort(
+        (a, b) => new Date(a.rental_start_date) - new Date(b.rental_start_date)
+      );
 
       // ✅ ADD THIS - Calculate statistics before processing
       calculateBookingStats(bookingsData);

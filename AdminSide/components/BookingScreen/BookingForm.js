@@ -6,7 +6,7 @@ import * as ImagePicker from "expo-image-picker"
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from "base64-arraybuffer";
-import { supabase } from "../../services/supabase";
+import { vehiclesService, variantsService, storageService } from "../../services/firebaseService";
 
 export default function BookingForm({
   booking,
@@ -81,18 +81,8 @@ export default function BookingForm({
 
   const fetchVehicleDetails = async (vehicleId) => {
     try {
-      const { data, error } = await supabase
-        .from('vehicles')
-        .select('price_per_day')
-        .eq('id', vehicleId)
-        .single();
-      
-      if (error) {
-        console.error('Error fetching vehicle details:', error);
-        return;
-      }
-      
-      setVehicleDetails(data);
+      const data = await vehiclesService.getById(vehicleId);
+      if (data) setVehicleDetails({ price_per_day: data.price_per_day });
     } catch (error) {
       console.error('Error fetching vehicle details:', error);
     }
@@ -100,28 +90,7 @@ export default function BookingForm({
 
   const fetchAllVehicles = async () => {
     try {
-      const { data, error } = await supabase
-        .from('vehicle_variants')
-        .select(`
-          id,
-          color,
-          image_url,
-          available_quantity,
-          total_quantity,
-          vehicle_id,
-          vehicles (
-            make,
-            model,
-            year,
-            price_per_day
-          )
-        `);
-      
-      if (error) {
-        console.error('Error fetching all vehicles:', error);
-        return;
-      }
-      
+      const data = await variantsService.listWithVehicles();
       setAllVehicles(data || []);
     } catch (error) {
       console.error('Error fetching all vehicles:', error);
@@ -165,19 +134,8 @@ export default function BookingForm({
   
       const fileExt = processedUri.split(".").pop() || "jpg";
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `gov_ids/${fileName}`;
-  
-      const { error } = await supabase.storage
-        .from("gov_ids")
-        .upload(filePath, byteArray, {
-          contentType: "image/jpeg",
-          upsert: false,
-        });
-  
-      if (error) throw error;
-  
-      const { data } = supabase.storage.from("gov_ids").getPublicUrl(filePath);
-      return data.publicUrl;
+      const blob = new Blob([byteArray], { type: "image/jpeg" });
+      return await storageService.uploadGovId(fileName, blob);
     } catch (err) {
       console.error("Upload error:", err);
       throw err;

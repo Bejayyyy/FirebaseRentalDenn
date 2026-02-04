@@ -17,7 +17,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '../services/supabase';
+import {
+  vehiclesService,
+  bookingsService,
+  notificationsService,
+  websiteContentService,
+  galleryService,
+  storageService,
+  firebaseAuth,
+} from '../services/firebaseService';
 import ActionModal from '../components/AlertModal/ActionModal';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -239,15 +247,8 @@ const WebsiteContentModal = ({ visible, onClose, section, onSave, setActionModal
   const fetchContent = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('website_content')
-        .select('*')
-        .eq('section', section)
-        .single();
+      const data = await websiteContentService.getBySection(section);
 
-      if (error) throw error;
-      
-      // Ensure proper data structure
       if (data && data.content) {
         // Add safety checks for each section type
         if (section === 'about_us') {
@@ -295,23 +296,12 @@ const WebsiteContentModal = ({ visible, onClose, section, onSave, setActionModal
         title: 'Save Changes',
         message: 'Are you sure you want to save these changes?',
         loading: saving,
-        onConfirm: async () => {
+          onConfirm: async () => {
           setSaving(true);
           setActionModalConfig(prev => ({ ...prev, loading: true }));
           
           try {
-            const { data: { user } } = await supabase.auth.getUser();
-  
-            const { error } = await supabase
-              .from('website_content')
-              .update({
-                content: content.content,
-                updated_at: new Date().toISOString(),
-                updated_by: user?.id
-              })
-              .eq('section', section);
-  
-            if (error) throw error;
+            await websiteContentService.upsert(section, { content: content.content });
   
             setFeedbackModal({
               visible: true,
@@ -689,13 +679,8 @@ const GalleryModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
   const fetchImages = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('gallery_images')
-        .select('*')
-        .order('display_order', { ascending: true });
-
-      if (error) throw error;
-      setImages(data || []);
+      const data = await galleryService.listImagesForUser();
+      setImages((data || []).sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0)));
     } catch (err) {
       console.error('Error fetching images:', err);
     } finally {
@@ -733,45 +718,22 @@ const GalleryModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
 
     setUploading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      // Upload to storage
-      const fileExt = uploadData.image.uri.split('.').pop();
+      const fileExt = uploadData.image.uri.split('.').pop() || 'jpg';
       const fileName = `${Date.now()}.${fileExt}`;
-      
-      // Create form data for upload
-      const formData = new FormData();
-      formData.append('file', {
-        uri: uploadData.image.uri,
-        name: fileName,
-        type: `image/${fileExt}`
+
+      const response = await fetch(uploadData.image.uri);
+      const blob = await response.blob();
+
+      const imageUrl = await storageService.uploadGalleryImage(fileName, blob);
+
+      await galleryService.addImageToUserGallery({
+        image_url: imageUrl,
+        title: uploadData.title || '',
+        description: uploadData.description || '',
+        uploaded_date: uploadData.uploadedDate,
+        display_order: images.length,
+        is_active: true,
       });
-
-      const { error: uploadError } = await supabase.storage
-        .from('gallery')
-        .upload(fileName, formData);
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('gallery')
-        .getPublicUrl(fileName);
-
-      // Save to database with uploaded_date
-      const { error: dbError } = await supabase
-        .from('gallery_images')
-        .insert({
-          image_url: urlData.publicUrl,
-          title: uploadData.title || '',
-          description: uploadData.description || '',
-          uploaded_date: uploadData.uploadedDate,
-          display_order: images.length,
-          is_active: true,
-          uploaded_by: user?.id
-        });
-
-      if (dbError) throw dbError;
 
       Alert.alert('Success', 'Image uploaded successfully!');
       
@@ -805,20 +767,7 @@ const GalleryModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
         setActionModalConfig(prev => ({ ...prev, loading: true }));
         
         try {
-          const fileName = imageUrl.split('/').pop();
-
-          const { error: storageError } = await supabase.storage
-            .from('gallery')
-            .remove([fileName]);
-
-          if (storageError) throw storageError;
-
-          const { error: dbError } = await supabase
-            .from('gallery_images')
-            .delete()
-            .eq('id', imageId);
-
-          if (dbError) throw dbError;
+          await galleryService.deleteImage(imageId);
 
           setFeedbackModal({
             visible: true,
@@ -841,12 +790,7 @@ const GalleryModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
 
   const toggleActive = async (imageId, currentStatus) => {
     try {
-      const { error } = await supabase
-        .from('gallery_images')
-        .update({ is_active: !currentStatus })
-        .eq('id', imageId);
-
-      if (error) throw error;
+      await galleryService.updateImage(imageId, { is_active: !currentStatus });
 
       fetchImages();
       onRefresh();
@@ -1074,14 +1018,8 @@ const ContactModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
   const fetchContent = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('website_content')
-        .select('*')
-        .eq('section', 'contact')
-        .single();
+      const data = await websiteContentService.getBySection('contact');
 
-      if (error) throw error;
-      
       if (data && data.content) {
         if (!data.content.social_media || !Array.isArray(data.content.social_media)) {
           data.content.social_media = [];
@@ -1120,18 +1058,7 @@ const ContactModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
         setActionModalConfig(prev => ({ ...prev, loading: true }));
         
         try {
-          const { data: { user } } = await supabase.auth.getUser();
-
-          const { error } = await supabase
-            .from('website_content')
-            .update({
-              content: content.content,
-              updated_at: new Date().toISOString(),
-              updated_by: user?.id
-            })
-            .eq('section', 'contact'); // 👈 FIXED: Changed from 'section' to 'contact'
-
-          if (error) throw error;
+          await websiteContentService.upsert('contact', { content: content.content });
 
           setFeedbackModal({
             visible: true,
@@ -1440,30 +1367,22 @@ export default function DashboardScreen({ navigation }) {
 
 
   useEffect(() => {
-    const getCurrentUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setCurrentUserId(user?.id);
-    };
-    getCurrentUser();
+    const user = firebaseAuth.getCurrentUser();
+    setCurrentUserId(user?.uid ?? null);
   }, []);
 
   const createNotification = async (notificationData) => {
     if (!currentUserId) return;
 
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .insert({
-          user_id: currentUserId,
-          booking_id: notificationData.bookingId,
-          title: notificationData.title,
-          message: notificationData.message,
-          type: notificationData.type,
-          read: false,
-          dismissed: false
-        });
-
-      if (error) console.error('Error creating notification:', error);
+      await notificationsService.add({
+        booking_id: notificationData.bookingId,
+        title: notificationData.title,
+        message: notificationData.message,
+        type: notificationData.type,
+        read: false,
+        dismissed: false,
+      });
     } catch (err) {
       console.error('Error creating notification:', err);
     }
@@ -1483,13 +1402,7 @@ export default function DashboardScreen({ navigation }) {
       const endTimeDiff = endDate.getTime() - today.getTime();
       const endDaysDiff = Math.ceil(endTimeDiff / (1000 * 3600 * 24));
 
-      const { data: existingNotifications } = await supabase
-        .from('notifications')
-        .select('id, type')
-        .eq('booking_id', booking.id)
-        .eq('user_id', currentUserId)
-        .eq('dismissed', false);
-
+      const existingNotifications = await notificationsService.listByBookingId(booking.id);
       const existingTypes = new Set(existingNotifications?.map(n => n.type) || []);
 
       if (booking.status === 'confirmed') {
@@ -1521,33 +1434,9 @@ export default function DashboardScreen({ navigation }) {
     if (!currentUserId) return;
 
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select(`
-          id,
-          title,
-          message,
-          type,
-          read,
-          dismissed,
-          created_at,
-          booking_id,
-          bookings (
-            customer_name,
-            vehicles (
-              make,
-              model,
-              year
-            )
-          )
-        `)
-        .eq('user_id', currentUserId)
-        .eq('dismissed', false)
-        .order('created_at', { ascending: false });
+      const data = await notificationsService.listUnread();
 
-      if (error) throw error;
-
-      const formattedNotifications = data.map(notification => {
+      const formattedNotifications = (data || []).map(notification => {
         const createdAt = new Date(notification.created_at);
         const now = new Date();
         const diffInMinutes = Math.floor((now - createdAt) / (1000 * 60));
@@ -1586,27 +1475,8 @@ export default function DashboardScreen({ navigation }) {
       const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
       const todayStr = today.toISOString().split('T')[0];
 
-      const { data: vehicles, error: vehicleError } = await supabase
-        .from('vehicles')
-        .select('*');
-      if (vehicleError) throw vehicleError;
-
-      const { data: bookings, error: bookingError } = await supabase
-        .from('bookings')
-        .select(`
-          *,
-          vehicles (
-            make,
-            model,
-            year
-          ),
-          vehicle_variants (
-            color,
-            plate_number
-          )
-        `)
-        .order('created_at', { ascending: false });
-      if (bookingError) throw bookingError;
+      const vehicles = await vehiclesService.list();
+      const bookings = await bookingsService.listWithDetails();
 
       const activeBookings = bookings?.filter(b => 
         b.status === 'confirmed' || b.status === 'pending'
@@ -1693,60 +1563,14 @@ export default function DashboardScreen({ navigation }) {
   useEffect(() => {
     if (!currentUserId) return;
 
-    const vehiclesSub = supabase
-      .channel('dashboard-vehicles-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'vehicles' 
-      }, fetchDashboardData)
-      .subscribe();
-
-    const bookingsSub = supabase
-      .channel('dashboard-bookings-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'bookings' 
-      }, (payload) => {
-        const { eventType, new: newBooking, old: oldBooking } = payload;
-
-        if (eventType === 'INSERT') {
-          createNotification({
-            bookingId: newBooking.id,
-            type: 'new_booking',
-            title: 'New Booking Added',
-            message: `${newBooking.customer_name} booked a vehicle`
-          });
-        }
-
-        if (eventType === 'UPDATE' && oldBooking.status !== newBooking.status) {
-          createNotification({
-            bookingId: newBooking.id,
-            type: 'status_change',
-            title: `Booking ${newBooking.status}`,
-            message: `${newBooking.customer_name}'s booking is now ${newBooking.status}`
-          });
-        }
-
-        fetchDashboardData();
-      })
-      .subscribe();
-
-    const notificationsSub = supabase
-      .channel('dashboard-notifications-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'notifications',
-        filter: `user_id=eq.${currentUserId}`
-      }, fetchNotifications)
-      .subscribe();
+    const unsubV = vehiclesService.subscribe(() => fetchDashboardData(), () => {});
+    const unsubB = bookingsService.subscribe(() => fetchDashboardData(), () => {});
+    const unsubN = notificationsService.subscribe(() => fetchNotifications(), () => {});
 
     return () => {
-      supabase.removeChannel(vehiclesSub);
-      supabase.removeChannel(bookingsSub);
-      supabase.removeChannel(notificationsSub);
+      unsubV();
+      unsubB();
+      unsubN();
     };
   }, [currentUserId]);
 
@@ -1756,7 +1580,7 @@ export default function DashboardScreen({ navigation }) {
       message: 'Are you sure you want to logout?',
       onConfirm: async () => {
         try {
-          await supabase.auth.signOut();
+          await firebaseAuth.signOut();
         } catch (error) {
           console.error('Logout error:', error);
           setFeedbackModal({ 
@@ -1777,20 +1601,7 @@ export default function DashboardScreen({ navigation }) {
         )
       );
 
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', notificationId)
-        .eq('user_id', currentUserId);
-
-      if (error) {
-        console.error('Error updating notification:', error);
-        setNotifications(prev =>
-          prev.map(notif =>
-            notif.id === notificationId ? { ...notif, read: false } : notif
-          )
-        );
-      }
+      await notificationsService.update(notificationId, { read: true });
     } catch (err) {
       console.error('Error marking notification as read:', err);
     }
@@ -1804,22 +1615,8 @@ export default function DashboardScreen({ navigation }) {
         try {
           setNotifications([]);
   
-          const { error } = await supabase
-            .from('notifications')
-            .update({ dismissed: true })
-            .eq('user_id', currentUserId)
-            .eq('dismissed', false);
-  
-          if (error) {
-            console.error('Error clearing all notifications:', error);
-            fetchNotifications();
-          } else {
-            setFeedbackModal({ 
-              visible: true, 
-              type: "success", 
-              message: "All notifications cleared successfully!" 
-            });
-          }
+          await notificationsService.markAllDismissed();
+          setFeedbackModal({ visible: true, type: "success", message: "All notifications cleared successfully!" });
         } catch (err) {
           console.error('Error clearing all notifications:', err);
           setFeedbackModal({ 
@@ -1836,16 +1633,7 @@ export default function DashboardScreen({ navigation }) {
     try {
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
 
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('user_id', currentUserId)
-        .eq('read', false);
-
-      if (error) {
-        console.error('Error marking all notifications as read:', error);
-        fetchNotifications();
-      }
+      await notificationsService.markAllRead();
     } catch (err) {
       console.error('Error marking all notifications as read:', err);
     }
@@ -1857,22 +1645,8 @@ export default function DashboardScreen({ navigation }) {
         prev.filter(notif => notif.id !== notificationId)
       );
   
-      const { error } = await supabase
-        .from('notifications')
-        .update({ dismissed: true })
-        .eq('id', notificationId)
-        .eq('user_id', currentUserId);
-  
-      if (error) {
-        console.error('Error dismissing notification:', error);
-        fetchNotifications();
-      } else {
-        setFeedbackModal({ 
-          visible: true, 
-          type: "success", 
-          message: "Notification removed successfully!" 
-        });
-      }
+      await notificationsService.update(notificationId, { dismissed: true });
+      setFeedbackModal({ visible: true, type: "success", message: "Notification removed successfully!" });
     } catch (err) {
       console.error('Error removing notification:', err);
     }

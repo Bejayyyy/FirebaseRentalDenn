@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from "react-native-svg";
-import { supabase } from "../../services/supabase";
+import { bookingsService } from "../../services/firebaseService";
 
 const { width } = Dimensions.get("window");
 
@@ -55,14 +55,13 @@ export default function RevenueOverviewChart() {
         endDate = new Date(selectedYear, 11, 31);
       }
 
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("*")
-        .eq("status", "completed")
-        .gte("rental_start_date", startDate.toISOString().split("T")[0])
-        .lte("rental_start_date", endDate.toISOString().split("T")[0]);
-
-      if (error) throw error;
+      const allBookings = await bookingsService.list();
+      const data = allBookings.filter(
+        (b) =>
+          b.status === "completed" &&
+          b.rental_start_date >= startDate.toISOString().split("T")[0] &&
+          b.rental_start_date <= endDate.toISOString().split("T")[0]
+      );
 
       let grouped = [];
       if (revenueFilter === "Today") {

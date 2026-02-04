@@ -17,7 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Circle, Line, Stop, LinearGradient, Defs } from 'react-native-svg';
 import { Calendar } from 'react-native-calendars';
-import { supabase } from '../services/supabase';
+import { bookingsService, variantsService, firebaseAuth } from '../services/firebaseService';
 import { Dropdown } from 'react-native-element-dropdown';
 import { Button } from 'react-native';
 import BookingForm from '../components/BookingScreen/BookingForm';
@@ -226,47 +226,7 @@ const handleBookingAdded = async (newBooking) => {
 
   const fetchBookings = async () => {
     try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select(`
-          id,
-          customer_name,
-          customer_email,
-          customer_phone,
-          rental_start_date,
-          rental_end_date,
-          total_price,
-          status,
-          created_at,
-          pickup_location,
-          license_number,
-          vehicle_id,
-          vehicle_variant_id,
-          gov_id_url,
-          contract_text,
-          contract_signed_name,
-          contract_signed_at,
-          vehicles (
-            make,
-            model,
-            year,
-            type
-          ),
-          vehicle_variants (
-            color,
-            plate_number,
-            available_quantity,
-            total_quantity
-          )
-        `)
-        .order('created_at', { ascending: false });
-  
-      if (error) {
-        console.error('Error fetching bookings:', error);
-        Alert.alert('Error', 'Failed to fetch bookings');
-        return;
-      }
-  
+      const data = await bookingsService.listWithDetails();
       setBookings(data || []);
     } catch (error) {
       console.error('Error:', error);
@@ -278,76 +238,22 @@ const handleBookingAdded = async (newBooking) => {
   };
 
   const fetchAvailableVehicles = async () => {
-    const { data, error } = await supabase
-      .from('vehicle_variants')
-      .select(`
-        id,
-        color,
-        image_url,
-        available_quantity,
-        total_quantity,
-        vehicle_id,
-        vehicles (
-          make,
-          model,
-          year,
-          price_per_day,
-          type
-        )
-      `)
-      .gt('available_quantity', 0);
-  
-    if (error) {
-      console.error('Error fetching variants:', error);
-      return;
+    try {
+      const data = await variantsService.listAvailableWithVehicles();
+      setAvailableVehicles(data || []);
+      const types = [...new Set(data?.map(variant => variant.vehicles?.type).filter(Boolean) || [])];
+      setVehicleTypes(types);
+    } catch (err) {
+      console.error('Error fetching variants:', err);
     }
-  
-    setAvailableVehicles(data || []);
-    // Change this line to use type instead of make
-    const types = [...new Set(data?.map(variant => variant.vehicles?.type).filter(Boolean) || [])];
-    setVehicleTypes(types);
   };
   
 
   const addNewBooking = async (newBookingData) => {
     try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .insert({
-          ...newBookingData,
-          created_at: new Date().toISOString()
-        })
-        .select(`
-          id,
-          customer_name,
-          customer_email,
-          customer_phone,
-          rental_start_date,
-          rental_end_date,
-          total_price,
-          status,
-          created_at,
-          pickup_location,
-          license_number,
-          vehicle_id,
-          contract_text,
-          contract_signed_name,
-          contract_signed_at,
-          vehicles (
-            make,
-            model,
-            year
-          )
-        `);
-
-      if (error) {
-        console.error('Add booking error:', error);
-        Alert.alert('Error', 'Failed to add booking');
-        return false;
-      }
-
-      // Add to local state
-      setBookings(prev => [data[0], ...prev]);
+      const { id } = await bookingsService.add(newBookingData);
+      const newBooking = { id, ...newBookingData };
+      setBookings(prev => [newBooking, ...prev]);
       await fetchAvailableVehicles();
       Alert.alert('Success', 'Booking added successfully');
       return true;
@@ -360,27 +266,14 @@ const handleBookingAdded = async (newBooking) => {
 
   const deleteBooking = async (bookingId) => {
     try {
-      const { data: booking, error: fetchError } = await supabase
-        .from("bookings")
-        .select("status, vehicle_variant_id")
-        .eq("id", bookingId)
-        .single();
-  
-      if (fetchError) throw fetchError;
-  
-      const { error } = await supabase
-        .from("bookings")
-        .delete()
-        .eq("id", bookingId);
-  
-      if (error) throw error;
-  
+      const booking = await bookingsService.getById(bookingId);
+      if (!booking) throw new Error('Booking not found');
+
       if (booking.status === "confirmed" && booking.vehicle_variant_id) {
-        await supabase.rpc("adjust_variant_quantity", {
-          variant_id: booking.vehicle_variant_id,
-          change: +1,
-        });
+        await variantsService.adjustQuantity(booking.vehicle_variant_id, +1);
       }
+
+      await bookingsService.delete(bookingId);
   
       await fetchBookings();
       await fetchAvailableVehicles();
@@ -605,16 +498,7 @@ const showConfirmation = (title, message, onConfirm) => {
       `Are you sure you want to change the status to "${newStatus}"?`,
       async () => {
         try {
-          const { error } = await supabase
-            .from('bookings')
-            .update({ status: newStatus, updated_at: new Date().toISOString() })
-            .eq('id', bookingId);
-
-          if (error) {
-            console.error('Status update error:', error);
-            Alert.alert('Error', 'Failed to update booking status');
-            return;
-          }
+          await bookingsService.update(bookingId, { status: newStatus });
 
           setBookings(prev => prev.map(booking =>
             booking.id === bookingId ? { ...booking, status: newStatus } : booking
@@ -639,21 +523,10 @@ const showConfirmation = (title, message, onConfirm) => {
 
   const updateBooking = async (updatedBooking) => {      
     try {       
-      // Fetch the existing booking to compare status changes
-      const { data: existingBooking, error: fetchError } = await supabase         
-        .from('bookings')         
-        .select('status, vehicle_variant_id, customer_email, customer_name')         
-        .eq('id', updatedBooking.id)         
-        .single();          
-  
-      if (fetchError) {         
-        console.error('Fetch error:', fetchError);         
-        setFeedbackModal({           
-          visible: true,           
-          type: "error",           
-          message: "Failed to fetch booking details",         
-        });         
-        return;       
+      const existingBooking = await bookingsService.getById(updatedBooking.id);
+      if (!existingBooking) {
+        setFeedbackModal({ visible: true, type: "error", message: "Failed to fetch booking details" });
+        return;
       }
   
       // Validate decline reason if status is declined
@@ -696,25 +569,13 @@ const showConfirmation = (title, message, onConfirm) => {
         }
       }
   
-      // Check if we have enough vehicles available for reservation
       if (quantityAdjustment < 0) {
-        const { data: variantData, error: variantError } = await supabase
-          .from('vehicle_variants')
-          .select('available_quantity')
-          .eq('id', variantId)
-          .single();
-  
-        if (variantError || !variantData) {
-          console.error('Error checking variant availability:', variantError);
-          setFeedbackModal({
-            visible: true,
-            type: "error",
-            message: "Failed to check vehicle availability",
-          });
+        const variantData = await variantsService.getById(variantId);
+        if (!variantData) {
+          setFeedbackModal({ visible: true, type: "error", message: "Failed to check vehicle availability" });
           return;
         }
-  
-        if (variantData.available_quantity <= 0) {
+        if ((variantData.available_quantity ?? 0) <= 0) {
           setFeedbackModal({
             visible: true,
             type: "error",
@@ -724,57 +585,29 @@ const showConfirmation = (title, message, onConfirm) => {
         }
       }
   
-      // Update the booking
-      const { error: updateError } = await supabase         
-        .from('bookings')         
-        .update({           
-          customer_name: updatedBooking.customer_name,           
-          customer_email: updatedBooking.customer_email,           
-          customer_phone: updatedBooking.customer_phone,           
-          rental_start_date: updatedBooking.rental_start_date,           
-          rental_end_date: updatedBooking.rental_end_date,           
-          total_price: updatedBooking.total_price,           
-          pickup_location: updatedBooking.pickup_location,           
-          license_number: updatedBooking.license_number,           
-          vehicle_id: updatedBooking.vehicle_id,           
-          vehicle_variant_id: updatedBooking.vehicle_variant_id,           
-          status: updatedBooking.status,           
-          gov_id_url: updatedBooking.gov_id_url,
-          decline_reason: updatedBooking.decline_reason || null,              
-          updated_at: new Date().toISOString(),                    
-        })         
-        .eq('id', updatedBooking.id);          
-  
-      if (updateError) {         
-        console.error('Booking update error:', updateError);         
-        setFeedbackModal({           
-          visible: true,           
-          type: "error",           
-          message: "Failed to update booking",         
-        });         
-        return;       
-      }
-  
-      // Apply quantity adjustment if needed
+      await bookingsService.update(updatedBooking.id, {
+        customer_name: updatedBooking.customer_name,
+        customer_email: updatedBooking.customer_email,
+        customer_phone: updatedBooking.customer_phone,
+        rental_start_date: updatedBooking.rental_start_date,
+        rental_end_date: updatedBooking.rental_end_date,
+        total_price: updatedBooking.total_price,
+        pickup_location: updatedBooking.pickup_location,
+        license_number: updatedBooking.license_number,
+        vehicle_id: updatedBooking.vehicle_id,
+        vehicle_variant_id: updatedBooking.vehicle_variant_id,
+        status: updatedBooking.status,
+        gov_id_url: updatedBooking.gov_id_url,
+        decline_reason: updatedBooking.decline_reason || null,
+      });
+
       if (quantityAdjustment !== 0 && variantId) {
-        const { error: quantityError } = await supabase.rpc('adjust_variant_quantity', {
-          variant_id: variantId,
-          change: quantityAdjustment,
-        });
+        try {
+          await variantsService.adjustQuantity(variantId, quantityAdjustment);
+        } catch (quantityError) {
+          await bookingsService.update(updatedBooking.id, { status: oldStatus });
   
-        if (quantityError) {
-          console.error('Quantity adjustment error:', quantityError);
-          // Rollback the booking update if quantity adjustment fails
-          await supabase
-            .from('bookings')
-            .update({ status: oldStatus })
-            .eq('id', updatedBooking.id);
-  
-          setFeedbackModal({
-            visible: true,
-            type: "error",
-            message: "Failed to update vehicle availability. Booking status reverted.",
-          });
+          setFeedbackModal({ visible: true, type: "error", message: "Failed to update vehicle availability. Booking status reverted." });
           return;
         }
       }
@@ -929,7 +762,7 @@ const showConfirmation = (title, message, onConfirm) => {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      await firebaseAuth.signOut();
     } catch (error) {
       console.error('Logout error:', error);
     }

@@ -5,7 +5,7 @@ import { Ionicons, Feather } from '@expo/vector-icons';
 import BookingOverviewChart from '../components/BookingOverviewChart';
 import RevenueOverviewChart from '../components/BookingScreen/RevenueOverviewChart';
 import VehicleAnalyticsChart from '../components/BookingScreen/VehicleAnalyticsChart';
-import { supabase } from '../services/supabase';
+import { bookingsService } from '../services/firebaseService';
 
 
 export default function BookingsAnalyticsScreen() {
@@ -52,28 +52,11 @@ export default function BookingsAnalyticsScreen() {
       setLoading(true);
       const startDate = getDateFilter();
 
-      // Fetch bookings with vehicle information
-      const { data: bookingsData, error: bookingsError } = await supabase
-        .from('bookings')
-        .select(`
-          *,
-          vehicles (
-            make,
-            model,
-            year,
-            image_url
-          )
-        `)
-        //.gte('created_at', startDate)
-        .order('created_at', { ascending: false });
-        console.log("Bookings Data:", bookingsData);
-
-
-      if (bookingsError) {
-        throw bookingsError;
-      }
-
-      setBookings(bookingsData || []);
+      const bookingsRaw = await bookingsService.listWithDetails();
+      const bookingsData = (bookingsRaw || []).sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at)
+      );
+      setBookings(bookingsData);
 
       // Calculate statistics
       const totalBookings = bookingsData?.length || 0;

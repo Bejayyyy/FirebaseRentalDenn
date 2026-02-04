@@ -16,7 +16,7 @@ import {
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import * as ImagePicker from "expo-image-picker"
-import { supabase } from "../services/supabase"
+import { vehiclesService, variantsService, carOwnersService, storageService } from "../services/firebaseService"
 import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system/legacy'
 import ActionModal from "../components/AlertModal/ActionModal"
@@ -87,17 +87,7 @@ export default function AddVehicleScreen({ navigation, route }) {
 
   const fetchCarOwners = async () => {
     try {
-      const { data, error } = await supabase
-        .from('car_owners')
-        .select('*')
-        .eq('status', 'active')
-        .order('name');
-
-      if (error) {
-        console.error('Error fetching car owners:', error);
-        return;
-      }
-
+      const data = await carOwnersService.list();
       const sortedOwners = (data || []).sort((a, b) => {
         if (a.name.toLowerCase() === 'rental den') return -1;
         if (b.name.toLowerCase() === 'rental den') return 1;
@@ -126,12 +116,9 @@ export default function AddVehicleScreen({ navigation, route }) {
   // MODIFIED: Load existing variants with is_available field
   const loadExistingVariants = async () => {
     try {
-      const { data: variants, error } = await supabase
-        .from('vehicle_variants')
-        .select('*')
-        .eq('vehicle_id', editingVehicle.id)
+      const variants = await variantsService.listByVehicleId(editingVehicle.id);
 
-      if (error) {
+      if (!variants) {
         console.error('Error loading variants:', error)
         return
       }
@@ -253,31 +240,15 @@ export default function AddVehicleScreen({ navigation, route }) {
         if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
         fileData = await response.blob();
 
-        const { error } = await supabase.storage
-          .from("vehicle-images")
-          .upload(filePath, fileData, { contentType, upsert: false });
-
-        if (error) throw error;
+        return await storageService.uploadVehicleImage(filePath, fileData);
       } else {
         const base64Data = await FileSystem.readAsStringAsync(processedUri, {
           encoding: "base64",
         });
-
-        const { error } = await supabase.storage
-          .from("vehicle-images")
-          .upload(filePath, decode(base64Data), {
-            contentType,
-            upsert: false,
-          });
-
-        if (error) throw error;
+        const arrayBuffer = decode(base64Data);
+        const blob = new Blob([arrayBuffer], { type: contentType });
+        return await storageService.uploadVehicleImage(filePath, blob);
       }
-
-      const { data: publicData } = supabase.storage
-        .from("vehicle-images")
-        .getPublicUrl(filePath);
-
-      return publicData.publicUrl;
     } catch (err) {
       console.error("Upload error:", err);
       throw err;
@@ -404,57 +375,25 @@ export default function AddVehicleScreen({ navigation, route }) {
       let vehicleId = editingVehicle?.id
   
       if (isEditing) {
-        const { error } = await supabase
-          .from('vehicles')
-          .update(vehicleData)
-          .eq('id', editingVehicle.id)
-  
-        if (error) {
-          console.error('Update error:', error)
-          throw error
-        }
-  
-        await supabase
-          .from('vehicle_variants')
-          .delete()
-          .eq('vehicle_id', editingVehicle.id)
-      } else { 
-        vehicleData.created_at = new Date().toISOString()
-        
-        const { data: newVehicle, error } = await supabase
-          .from('vehicles')
-          .insert([vehicleData])
-          .select()
-          .single()
-  
-        if (error) {
-          console.error('Insert error:', error)
-          throw error
-        }
-  
-        vehicleId = newVehicle.id
+        await vehiclesService.update(editingVehicle.id, vehicleData);
+        await variantsService.deleteByVehicleId(editingVehicle.id);
+      } else {
+        const { id } = await vehiclesService.add(vehicleData);
+        vehicleId = id;
       }
-  
-      // MODIFIED: Insert variants with is_available field
-      const variantInserts = variantsWithImages.map(variant => ({
-        vehicle_id: vehicleId,
-        color: variant.color,
-        plate_number: variant.plateNumber.trim().toUpperCase(),
-        price_per_day: Number.parseFloat(variant.pricePerDay),
-        image_url: variant.imageUrl,
-        is_available: variant.isAvailable, // NEW FIELD
-        owner_id: variant.ownerId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }))
-  
-      const { error: variantError } = await supabase
-        .from('vehicle_variants')
-        .insert(variantInserts)
-  
-      if (variantError) {
-        console.error('Variant insert error:', variantError)
-        throw variantError
+
+      for (const variant of variantsWithImages) {
+        await variantsService.add({
+          vehicle_id: vehicleId,
+          color: variant.color,
+          plate_number: variant.plateNumber.trim().toUpperCase(),
+          price_per_day: Number.parseFloat(variant.pricePerDay),
+          image_url: variant.imageUrl,
+          is_available: variant.isAvailable,
+          available_quantity: variant.isAvailable ? 1 : 0,
+          total_quantity: 1,
+          owner_id: variant.ownerId,
+        });
       }
   
       setFeedbackModal({

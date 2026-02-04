@@ -3,7 +3,7 @@ import { companyInfo } from './companyInfo';
 import ChatForm from './ChatForm';
 import ChatMessage from './ChatMessage';
 import denni from './denni_logo.svg'
-import supabase from '../src/lib/supabase'
+import * as firebaseService from '../src/lib/firebaseService'
 function RentalBot() {
   const [chatHistory, setChatHistory] = useState([{
     hideInChat: true,
@@ -23,40 +23,30 @@ function RentalBot() {
   useEffect(() => {
     const loadVehicleCatalog = async () => {
       try {
-        const { data, error } = await supabase
-          .from('vehicles')
-          .select('id, make, model, year, type, seats, price_per_day, available, available_quantity')
-          .order('make', { ascending: true });
+        const vehiclesRaw = await firebaseService.listVehicles();
+        const vehicles = (vehiclesRaw || []).map((v) => ({
+          id: v.id,
+          make: v.make,
+          model: v.model,
+          year: v.year,
+          type: v.type,
+          seats: v.seats,
+          price_per_day: v.price_per_day,
+          available: v.available,
+          available_quantity: v.available_quantity,
+        }));
 
-        if (error) throw error;
-
-        const vehicles = Array.isArray(data) ? data : [];
-
-        // load variants with nested vehicle basics
-        const { data: variantsData, error: variantsError } = await supabase
-          .from('vehicle_variants')
-          .select(`
-            id,
-            color,
-            image_url,
-            available_quantity,
-            total_quantity,
-            vehicle_id,
-            vehicles (
-              make,
-              model,
-              year,
-              type,
-              seats,
-              price_per_day,
-              available
-            )
-          `)
-          .order('color', { ascending: true });
-
-        if (variantsError) throw variantsError;
-
-        const variants = Array.isArray(variantsData) ? variantsData : [];
+        const variantsRaw = await firebaseService.listAllVariants();
+        const vehicleMap = Object.fromEntries(vehicles.map((v) => [v.id, v]));
+        const variants = (variantsRaw || []).map((v) => ({
+          id: v.id,
+          color: v.color,
+          image_url: v.image_url,
+          available_quantity: v.available_quantity,
+          total_quantity: v.total_quantity,
+          vehicle_id: v.vehicle_id,
+          vehicles: vehicleMap[v.vehicle_id] || null,
+        }));
 
         // Build concise, structured catalog for LLM consumption
         const catalog = {

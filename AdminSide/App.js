@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, Linking } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase, debugConnectivity } from './services/supabase';
+import { firebaseAuth, debugConnectivity } from './services/firebaseService';
 import { AuthProvider } from './services/AuthContext';
 
 // Import screens (ensure imports paths are correct)
@@ -409,24 +409,19 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 1) Supabase session handling
+  // 1) Firebase Auth session handling
   useEffect(() => {
-    // Quick connectivity diagnostics on cold start
     debugConnectivity().catch(() => {});
-    const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      setLoading(false);
-    };
+    const currentUser = firebaseAuth.getCurrentUser();
+    setUser(currentUser ?? null);
+    setLoading(false);
 
-    getInitialSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
+    const unsub = firebaseAuth.onAuthStateChange((user) => {
+      setUser(user ?? null);
       setLoading(false);
     });
 
-    return () => subscription?.unsubscribe();
+    return () => unsub();
   }, []);
 
   // 2) Deep link handling

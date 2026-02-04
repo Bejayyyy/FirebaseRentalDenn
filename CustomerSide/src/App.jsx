@@ -10,7 +10,7 @@ import {
   FaInstagram,
   FaLinkedinIn,
 } from "react-icons/fa"
-import { supabase } from "./lib/supabase"
+import * as firebaseService from "./lib/firebaseService"
 import { IoSpeedometerOutline, IoPeopleOutline, IoCarOutline } from "react-icons/io5";
 import HeroPageCar2 from "./assets/HeroPage/car2.png"
 import logo from "./assets/logo/logoRental.png"
@@ -114,28 +114,12 @@ const DetailsModal = ({ isOpen, onClose, car, onRentClick }) => {
         if (!car?.id) return;
         
         // Fetch variants
-        const { data: variantsData, error: varError } = await supabase
-          .from("vehicle_variants")
-          .select("*")
-          .eq("vehicle_id", car.id);
-        
-        if (varError) {
-          console.error('Error fetching variants:', varError);
-          return;
-        }
-  
-        // Fetch current bookings
+        const variantsData = await firebaseService.listVariantsByVehicleId(car.id);
         const today = new Date().toISOString().split('T')[0];
-        const { data: bookings, error: bookError } = await supabase
-          .from("bookings")
-          .select("*")
-          .eq("status", "confirmed")
-          .gte("rental_end_date", today)
-          .lte("rental_start_date", today);
-  
-        if (bookError) {
-          console.error('Error fetching bookings:', bookError);
-        }
+        const allBookings = await firebaseService.listConfirmedBookings();
+        const bookings = allBookings.filter(
+          (b) => b.status === "confirmed" && b.rental_end_date >= today && b.rental_start_date <= today
+        );
   
         // Calculate stats for each individual variant
         const stats = {};
@@ -493,13 +477,9 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
     if (!variantId) return;
     
     try {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("rental_start_date, rental_end_date")
-        .eq("vehicle_variant_id", variantId)
-        .eq("status", "confirmed");
+      const data = await firebaseService.listBookingsByVariantId(variantId);
 
-      if (!error && data) {
+      if (data?.length) {
         const dates = [];
         data.forEach(booking => {
           const start = new Date(booking.rental_start_date);
@@ -520,12 +500,9 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
     if (!selectedCar?.id) return;
     setVariantsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("vehicle_variants")
-        .select("*")
-        .eq("vehicle_id", selectedCar.id);
+      const data = await firebaseService.listVariantsByVehicleId(selectedCar.id);
   
-      if (!error && data) {
+      if (data?.length) {
         setVariants(data);
         
         // FIXED: Group variants by color (case-insensitive)
@@ -705,10 +682,11 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
 
     try {
       const fileName = `${Date.now()}_${govIdFile.name}`;
-      const { error: uploadError } = await supabase.storage.from("gov_ids").upload(fileName, govIdFile);
-      if (uploadError) throw uploadError;
-      const { data: urlData } = supabase.storage.from("gov_ids").getPublicUrl(fileName);
-      const govIdUrl = urlData?.publicUrl || "";
+      const govIdUrl = await firebaseService.uploadGovId(fileName, govIdFile);
+
+      const vehicleData = await firebaseService.getVehicleById(selectedCar.id);
+      const ownerUserId = vehicleData?.user_id || null;
+      if (!ownerUserId) throw new Error("Could not determine vehicle owner");
 
       const bookingRow = {
         vehicle_id: selectedCar.id,
@@ -728,13 +706,8 @@ const RentalModal = ({ isOpen, onClose, selectedCar, refreshBookings }) => {
         contract_signed_at: contractDetails?.signedAt || null,
       };
 
-      const { data: insertedBooking, error: insertError } = await supabase
-        .from("bookings")
-        .insert([bookingRow])
-        .select()
-        .single();
-      
-      if (insertError) throw insertError;
+      const { id } = await firebaseService.createBooking(bookingRow, ownerUserId);
+      const insertedBooking = { id, ...bookingRow };
 
       try {
         const emailData = {
@@ -1460,11 +1433,8 @@ const Navbar = ({ onRentClick, scrollToSection, refs }) => {
     useEffect(() => {
       const fetchContent = async () => {
         try {
-          const { data, error } = await supabase
-            .from('website_content')
-            .select('*')
-            .eq('section', 'about_us')
-            .single();
+          const data = await firebaseService.getWebsiteContent('about_us');
+          const error = !data;
           
           if (error) throw error;
           setContent(data.content);
@@ -1479,41 +1449,29 @@ const Navbar = ({ onRentClick, scrollToSection, refs }) => {
     useEffect(() => {
       const fetchVehicleStats = async () => {
         try {
-          const { data: vehicles, error: vehicleError } = await supabase
-            .from("vehicles")
-            .select(`
-              id,
-              vehicle_variants (
-                id,
-                is_available
-              )
-            `)
-          
-          if (vehicleError) throw vehicleError
-  
-          const today = new Date().toISOString().split('T')[0]
-          const { data: bookings, error: bookingError } = await supabase
-            .from("bookings")
-            .select("vehicle_variant_id")
-            .eq("status", "confirmed")
-            .gte("rental_end_date", today)
-            .lte("rental_start_date", today)
-  
-          if (bookingError) throw bookingError
-  
-          const rentedVariantIds = new Set(bookings.map(b => b.vehicle_variant_id))
-  
-          const totalVehicles = vehicles?.length || 0
-  
-          let availableCount = 0
-          vehicles?.forEach(vehicle => {
-            const hasAvailableVariant = vehicle.vehicle_variants?.some(variant => 
-              variant.is_available && !rentedVariantIds.has(variant.id)
-            )
-            if (hasAvailableVariant) {
-              availableCount++
-            }
-          })
+          const vehicles = await firebaseService.listVehicles();
+          const allVariants = await firebaseService.listAllVariants();
+          const today = new Date().toISOString().split('T')[0];
+          const allBookings = await firebaseService.listConfirmedBookings();
+          const rentedVariantIds = new Set(
+            allBookings.filter(
+              (b) => b.rental_end_date >= today && b.rental_start_date <= today
+            ).map((b) => b.vehicle_variant_id)
+          );
+          const variantsByVehicle = {};
+          allVariants?.forEach((v) => {
+            if (!variantsByVehicle[v.vehicle_id]) variantsByVehicle[v.vehicle_id] = [];
+            variantsByVehicle[v.vehicle_id].push(v);
+          });
+          const totalVehicles = vehicles?.length || 0;
+          let availableCount = 0;
+          vehicles?.forEach((vehicle) => {
+            const variants = variantsByVehicle[vehicle.id] || [];
+            const hasAvailableVariant = variants.some(
+              (v) => (v.is_available !== false) && !rentedVariantIds.has(v.id)
+            );
+            if (hasAvailableVariant) availableCount++;
+          });
   
           setVehicleCount(totalVehicles)
           setAvailableVehicleCount(availableCount)
@@ -1743,11 +1701,8 @@ const WhyChooseUs = () => {
     useEffect(() => {
       const fetchContent = async () => {
         try {
-          const { data, error } = await supabase
-            .from('website_content')
-            .select('*')
-            .eq('section', 'how_it_works')
-            .single();
+          const data = await firebaseService.getWebsiteContent('how_it_works');
+          const error = !data;
           
           if (error) throw error;
           setContent(data.content);
@@ -1823,25 +1778,12 @@ const CarCard = ({ car, onRentClick, onOpenDetails, index }) => {
       setIsLoading(true);
 
       try {
-        // Fetch variants
-        const { data: variants, error: varError } = await supabase
-          .from("vehicle_variants")
-          .select("*")
-          .eq("vehicle_id", car.id)
-          .order("created_at", { ascending: true });
-
-        if (varError) throw varError;
-
-        // Fetch current bookings
+        const variants = await firebaseService.listVariantsByVehicleId(car.id);
         const today = new Date().toISOString().split('T')[0];
-        const { data: bookings, error: bookError } = await supabase
-          .from("bookings")
-          .select("*")
-          .eq("status", "confirmed")
-          .gte("rental_end_date", today)
-          .lte("rental_start_date", today);
-
-        if (bookError) throw bookError;
+        const allBookings = await firebaseService.listConfirmedBookings();
+        const bookings = allBookings.filter(
+          (b) => b.rental_end_date >= today && b.rental_start_date <= today
+        );
 
         // FIXED: Group by unique color names (case-insensitive)
         const colorGroups = {};
@@ -2043,12 +1985,8 @@ const FleetSection = ({ onRentClick, onOpenDetails }) => {
 
   const fetchCategories = async () => {
     try {
-      const { data, error } = await supabase
-        .from("vehicles")
-        .select("type")
-        .not("type", "is", null);
-      
-      if (error) throw error;
+      const vehicles = await firebaseService.listVehicles();
+      const data = vehicles?.map((v) => ({ type: v.type })).filter((v) => v.type) || [];
       
       const uniqueTypes = [...new Set(data.map(vehicle => vehicle.type))];
       setCategories(["All", ...uniqueTypes]);
@@ -2069,12 +2007,7 @@ const FleetSection = ({ onRentClick, onOpenDetails }) => {
   const fetchVehicles = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("vehicles")
-        .select(`
-          *,
-          vehicle_variants ( available_quantity )
-        `)
+      const data = await firebaseService.listVehicles();
         .order("created_at", { ascending: false });
       if (error) throw error;
 
@@ -2263,11 +2196,8 @@ const FleetSection = ({ onRentClick, onOpenDetails }) => {
     useEffect(() => {
       const fetchContent = async () => {
         try {
-          const { data, error } = await supabase
-            .from('website_content')
-            .select('*')
-            .eq('section', 'faqs')
-            .single();
+          const data = await firebaseService.getWebsiteContent('faqs');
+          const error = !data;
           
           if (error) throw error;
           setContent(data.content);
@@ -2360,11 +2290,8 @@ const FleetSection = ({ onRentClick, onOpenDetails }) => {
       useEffect(() => {
         const fetchGallery = async () => {
           try {
-            const { data, error } = await supabase
-              .from('gallery_images')
-              .select('*')
-              .eq('is_active', true)
-              .order('display_order', { ascending: true });
+            const data = await firebaseService.listGalleryImages();
+            const error = !data;
             
             if (error) throw error;
             setImages(data || []);
@@ -2599,11 +2526,8 @@ const ContactUs = () => {
   useEffect(() => {
     const fetchContent = async () => {
       try {
-        const { data, error } = await supabase
-          .from('website_content')
-          .select('*')
-          .eq('section', 'contact')
-          .single();
+        const data = await firebaseService.getWebsiteContent('contact');
+        const error = !data;
         
         if (error) throw error;
         setContent(data.content);
@@ -2816,12 +2740,8 @@ const Footer = () => {
     }
   
     const fetchBookings = async () => {
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("*")
-        .eq("status", "confirmed")
-        .order("id", { ascending: false })
-      if (!error) setBookings(data || [])
+      const data = await firebaseService.listConfirmedBookings();
+      setBookings(data || []);
     }
   
     useEffect(() => {

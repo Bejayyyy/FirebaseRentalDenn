@@ -10,7 +10,7 @@ import {
   FlatList
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabase';
+import { carOwnersService, variantsService, bookingsService, vehiclesService } from '../services/firebaseService';
 
 export default function OwnerProfileScreen({ navigation, route }) {
   const { ownerId } = route.params;
@@ -24,117 +24,32 @@ export default function OwnerProfileScreen({ navigation, route }) {
     fetchOwnerData();
 
     // Set up real-time subscriptions
-    const bookingsSubscription = supabase
-      .channel('owner-bookings-channel')
-      .on('postgres_changes', 
-        { 
-          event: '*', // Listen to INSERT, UPDATE, and DELETE
-          schema: 'public', 
-          table: 'bookings' 
-        }, 
-        (payload) => {
-          console.log('Booking change detected:', payload.eventType, payload);
-          
-          // Handle different event types
-          switch(payload.eventType) {
-            case 'INSERT':
-              console.log('New booking added');
-              break;
-            case 'UPDATE':
-              console.log('Booking updated');
-              break;
-            case 'DELETE':
-              console.log('Booking deleted:', payload.old);
-              break;
-          }
-          
-          // Refresh owner data when any booking changes
-          fetchOwnerData();
-        }
-      )
-      .subscribe();
-
-    // Subscribe to vehicle_variants changes
-    const variantsSubscription = supabase
-      .channel('owner-variants-channel')
-      .on('postgres_changes', 
-        { 
-          event: '*',
-          schema: 'public', 
-          table: 'vehicle_variants',
-          filter: `owner_id=eq.${ownerId}` // Only listen to this owner's variants
-        }, 
-        (payload) => {
-          console.log('Vehicle variant change detected:', payload.eventType);
-          fetchOwnerData();
-        }
-      )
-      .subscribe();
-
-    // Cleanup both subscriptions on unmount
-    return () => {
-      supabase.removeChannel(bookingsSubscription);
-      supabase.removeChannel(variantsSubscription);
-    };
+    const unsubB = bookingsService.subscribe(() => fetchOwnerData(), () => {});
+    return () => unsubB();
   }, [ownerId]);
 
   const fetchOwnerData = async () => {
     try {
-      // Fetch owner details
-      const { data: ownerData, error: ownerError } = await supabase
-        .from('car_owners')
-        .select('*')
-        .eq('id', ownerId)
-        .single();
+      const ownerData = await carOwnersService.getById(ownerId);
+      if (!ownerData) throw new Error('Owner not found');
 
-      if (ownerError) throw ownerError;
+      const variantsData = await variantsService.listByOwnerId(ownerId);
+      const vehicles = await vehiclesService.list();
+      const vehiclesMap = Object.fromEntries(vehicles.map((v) => [v.id, v]));
+      const variantsWithVehicles = (variantsData || []).map((v) => ({
+        ...v,
+        vehicles: vehiclesMap[v.vehicle_id] || null,
+      }));
 
-      // Fetch vehicle variants owned by this owner
-      const { data: variantsData, error: variantsError } = await supabase
-        .from('vehicle_variants')
-        .select(`
-          *,
-          vehicles (
-            make,
-            model,
-            year,
-            id
-          )
-        `)
-        .eq('owner_id', ownerId);
-
-      if (variantsError) throw variantsError;
-
-      // Fetch bookings for these variants
-      const variantIds = variantsData?.map(v => v.id) || [];
+      const variantIds = variantsWithVehicles.map((v) => v.id);
       let allBookings = [];
-
       if (variantIds.length > 0) {
-        const { data: bookingsData, error: bookingsError } = await supabase
-          .from('bookings')
-          .select(`
-            *,
-            vehicles (
-              make,
-              model,
-              year
-            ),
-            vehicle_variants (
-              color,
-              plate_number
-            )
-          `)
-          .in('vehicle_variant_id', variantIds)
-          .order('created_at', { ascending: false });
-
-        if (!bookingsError) {
-          allBookings = bookingsData || [];
-        }
+        allBookings = await bookingsService.listByVariantIds(variantIds);
+        allBookings = allBookings.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       }
     
 
-      // Calculate variant earnings
-      const variantsWithEarnings = variantsData?.map(variant => {
+      const variantsWithEarnings = variantsWithVehicles?.map(variant => {
         const variantBookings = allBookings.filter(b => b.vehicle_variant_id === variant.id);
         const totalEarned = variantBookings
           .filter(b => b.status === 'completed')
