@@ -2007,9 +2007,8 @@ const FleetSection = ({ onRentClick, onOpenDetails }) => {
   const fetchVehicles = async () => {
     try {
       setLoading(true);
+      // Fetch vehicles from Firebase service (already ordered in the backend if needed)
       const data = await firebaseService.listVehicles();
-        .order("created_at", { ascending: false });
-      if (error) throw error;
 
       const enriched = (data || []).map((v) => {
         const variants = v.vehicle_variants || [];

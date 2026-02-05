@@ -21,6 +21,10 @@ import { decode } from 'base64-arraybuffer'
 import * as FileSystem from 'expo-file-system/legacy'
 import ActionModal from "../components/AlertModal/ActionModal"
 import * as ImageManipulator from 'expo-image-manipulator'
+import { ref, uploadBytes } from "firebase/storage";
+import { storage } from "../services/firebase"
+
+
 
 const { width } = Dimensions.get("window")
 const isWeb = Platform.OS === "web"
@@ -214,10 +218,11 @@ export default function AddVehicleScreen({ navigation, route }) {
 
   const uploadImage = async (uri) => {
     if (!uri) return null;
-
+  
     try {
       let processedUri = uri;
-
+  
+      // Convert HEIC images to JPEG on iOS
       if (uri.toLowerCase().endsWith(".heic")) {
         const manipResult = await ImageManipulator.manipulateAsync(
           uri,
@@ -226,27 +231,22 @@ export default function AddVehicleScreen({ navigation, route }) {
         );
         processedUri = manipResult.uri;
       }
-
+  
       const fileExt = processedUri.split(".").pop()?.toLowerCase() || "jpg";
       const safeExt = fileExt === "heic" ? "jpg" : fileExt;
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${safeExt}`;
       const filePath = `vehicle-variants/${fileName}`;
-      const contentType = `image/${safeExt === "jpg" ? "jpeg" : safeExt}`;
-
-      let fileData;
-
+  
       if (Platform.OS === "web") {
+        // Web: fetch as blob
         const response = await fetch(processedUri);
         if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-        fileData = await response.blob();
-
-        return await storageService.uploadVehicleImage(filePath, fileData);
+        const blob = await response.blob();
+        return await storageService.uploadVehicleImage(filePath, blob);
       } else {
-        const base64Data = await FileSystem.readAsStringAsync(processedUri, {
-          encoding: "base64",
-        });
-        const arrayBuffer = decode(base64Data);
-        const blob = new Blob([arrayBuffer], { type: contentType });
+        // React Native (iOS / Android): fetch local file as blob
+        const response = await fetch(processedUri);
+        const blob = await response.blob(); // this works for local files on RN
         return await storageService.uploadVehicleImage(filePath, blob);
       }
     } catch (err) {
@@ -254,6 +254,7 @@ export default function AddVehicleScreen({ navigation, route }) {
       throw err;
     }
   };
+  
 
   const handleTypeSelection = (type) => {
     if (type === "Other") {

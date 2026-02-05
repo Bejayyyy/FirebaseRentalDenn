@@ -1,8 +1,14 @@
 // Firebase SDK for AdminSide (React Native/Expo)
+import { Platform } from "react-native";
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import {
+  getAuth,
+  initializeAuth,
+  getReactNativePersistence,
+} from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAR4qxgZ3Hby17weDvxGbvGRNHhsR7v-EY",
@@ -15,7 +21,16 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+
+// Use persistent auth storage on native (iOS/Android) so the user
+// stays logged in across app reloads. On web, use the default browser
+// persistence from getAuth.
+const auth =
+  Platform.OS === "web"
+    ? getAuth(app)
+    : initializeAuth(app, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
 
 const db = getFirestore(app);
 const storage = getStorage(app);
