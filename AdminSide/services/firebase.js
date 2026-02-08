@@ -36,4 +36,9 @@ const auth =
 const db = getFirestore(app);
 const storage = getStorage(app);
 const functions = getFunctions(app);
-export { app, auth, db, storage, functions };
+
+// Secondary app for creating new users without affecting owner's session
+const appUserCreation = initializeApp(firebaseConfig, "UserCreation");
+const authUserCreation = getAuth(appUserCreation);
+
+export { app, auth, db, storage, functions, appUserCreation, authUserCreation };

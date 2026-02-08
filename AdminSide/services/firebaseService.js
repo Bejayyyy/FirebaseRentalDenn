@@ -20,9 +20,9 @@ import {
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, onAuthStateChanged } from "firebase/auth";
-import { auth, db, storage } from "./firebase";
+import { ref, uploadBytes, uploadString, getDownloadURL, deleteObject, StringFormat } from "firebase/storage";
+import { signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updatePassword, onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
+import { auth, authUserCreation, db, storage } from "./firebase";
 
 // ============ AUTH ============
 export const firebaseAuth = {
@@ -729,6 +729,14 @@ export const storageService = {
     return getDownloadURL(storageRef);
   },
 
+  uploadGovIdFromBase64: async (fileName, base64Data) => {
+    const ownerId = requireOwnerId();
+    const path = `gov_ids/${ownerId}/${fileName}`;
+    const storageRef = ref(storage, path);
+    await uploadString(storageRef, base64Data, StringFormat.BASE64, { contentType: "image/jpeg" });
+    return getDownloadURL(storageRef);
+  },
+
   uploadGalleryImage: async (fileName, blob) => {
     const ownerId = requireOwnerId();
     const path = `gallery/${ownerId}/${fileName}`;
@@ -779,6 +787,31 @@ export const appUsersService = {
     if (!snap.exists()) throw new Error("User not found");
     if (snap.data().owner_uid !== ownerId) throw new Error("Access denied");
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
+  },
+
+  // Create new Admin/Driver: Auth user (via secondary app) + Firestore app_users doc
+  create: async (data) => {
+    const ownerId = requireOwnerId();
+    if (getRoleSync() !== "owner") throw new Error("Only Owner can create users");
+    const { email, password, full_name, contact_number, role, status } = data;
+    if (!email || !password || !role) throw new Error("Email, password, and role are required");
+
+    // Use secondary app so owner stays signed in on primary app
+    const cred = await createUserWithEmailAndPassword(authUserCreation, email, password);
+    const newUid = cred.user.uid;
+    await signOut(authUserCreation);
+
+    await setDoc(doc(db, "app_users", newUid), {
+      full_name: full_name || "",
+      email,
+      contact_number: contact_number || null,
+      role,
+      status: status || "active",
+      owner_uid: ownerId,
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
+    }, { merge: true });
+    return { id: newUid };
   },
 };
 

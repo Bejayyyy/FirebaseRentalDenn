@@ -50,8 +50,7 @@ const NotificationBell = ({ notifications, onPress }) => {
     inputRange: [-1, 1],
     outputRange: ['-15deg', '15deg'],
   });
-  console.log("Current user:", firebaseAuth.currentUser);
-
+  console.log("Current user:", firebaseAuth.getCurrentUser());
   return (
     <TouchableOpacity style={styles.notificationBell} onPress={onPress}>
       <Animated.View style={{ transform: [{ rotate: bellRotate }] }}>
@@ -698,7 +697,7 @@ const GalleryModal = ({ visible, onClose, onRefresh, setActionModalConfig, setFe
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [16, 9],
       quality: 0.8,

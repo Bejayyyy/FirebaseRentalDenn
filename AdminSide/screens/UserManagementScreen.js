@@ -16,8 +16,6 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { appUsersService, firebaseAuth } from "../services/firebaseService";
 import ActionModal from "../components/AlertModal/ActionModal";
-import { functions } from "../services/firebase";
-import { httpsCallable } from "firebase/functions";
 
 
 const ROLES = [
@@ -61,6 +59,7 @@ export default function UserManagementScreen({ navigation }) {
   useEffect(() => {
     loadUsers();
   }, []);
+  
 
   const openAdd = () => {
     setEditingUser(null);
@@ -112,10 +111,8 @@ const handleSave = async () => {
       });
       setFeedback({ visible: true, type: "success", message: "User updated." });
     } else {
-      // Call the deployed Cloud Function to create a new Admin/Driver
-      const createAppUser = httpsCallable(functions, "createAppUser");
-
-      await createAppUser({
+      // Create user via Firestore + Firebase Auth (no Cloud Function)
+      await appUsersService.create({
         full_name: form.full_name.trim(),
         email: form.email.trim(),
         contact_number: form.contact_number?.trim() || null,
@@ -123,7 +120,6 @@ const handleSave = async () => {
         role: form.role,
         status: form.status,
       });
-
       setFeedback({ visible: true, type: "success", message: "User created successfully." });
     }
 
@@ -185,8 +181,6 @@ const handleSave = async () => {
       </View>
     </View>
   );
-  console.log("Current user:", firebaseAuth.currentUser);
-
 
   return (
     

@@ -4,8 +4,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Dropdown } from "react-native-element-dropdown";
 import * as ImagePicker from "expo-image-picker"
 import * as ImageManipulator from "expo-image-manipulator";
-import * as FileSystem from 'expo-file-system/legacy';
-import { decode } from "base64-arraybuffer";
 import { vehiclesService, variantsService, storageService } from "../../services/firebaseService";
 
 export default function BookingForm({
@@ -109,32 +107,37 @@ export default function BookingForm({
     return 0;
   };
 
-  // Enhanced image upload function
+  // Image upload - same approach as AddVehicleScreen (fetch + blob)
   const uploadImage = async (uri) => {
     if (!uri) return null;
-  
+
     try {
-      let { uri: processedUri } = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1024 } }],
-        { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
-      );
-  
-      const base64Data = await FileSystem.readAsStringAsync(processedUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-  
-      // convert base64 string → byte array (faster than arrayBuffer dance)
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      let processedUri = uri;
+
+      // Convert HEIC to JPEG on iOS if needed
+      if (uri.toLowerCase().endsWith(".heic")) {
+        const manipResult = await ImageManipulator.manipulateAsync(
+          uri,
+          [],
+          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        processedUri = manipResult.uri;
+      } else {
+        const manipResult = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 1024 } }],
+          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        processedUri = manipResult.uri;
       }
-      const byteArray = new Uint8Array(byteNumbers);
-  
-      const fileExt = processedUri.split(".").pop() || "jpg";
-      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const blob = new Blob([byteArray], { type: "image/jpeg" });
+
+      const fileExt = processedUri.split(".").pop()?.toLowerCase() || "jpg";
+      const safeExt = fileExt === "heic" ? "jpg" : fileExt;
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${safeExt}`;
+
+      const response = await fetch(processedUri);
+      if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+      const blob = await response.blob();
       return await storageService.uploadGovId(fileName, blob);
     } catch (err) {
       console.error("Upload error:", err);
@@ -188,7 +191,7 @@ export default function BookingForm({
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         allowsEditing: true,
         quality: 0.7,
         aspect: [4, 3],

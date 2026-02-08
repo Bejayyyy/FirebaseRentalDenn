@@ -5,7 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, Linking } from 'react-native';
+import { View, Text, Linking, TouchableOpacity } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { firebaseAuth, debugConnectivity, getCurrentAppUser, ensureOwnerAppUser, setAuthCache } from './services/firebaseService';
 import { AuthProvider } from './services/AuthContext';
@@ -194,7 +194,27 @@ function DriverScheduleStack() {
         headerTitleStyle: { fontFamily: 'Roboto' },
       }}
     >
-      <Stack.Screen name="DriverBookingsList" component={BookingsScreen} options={{ title: 'My Schedule' }} />
+      <Stack.Screen
+        name="DriverBookingsList"
+        component={BookingsScreen}
+        options={{
+          title: 'My Schedule',
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  await firebaseAuth.signOut();
+                } catch (e) {
+                  console.error('Logout error:', e);
+                }
+              }}
+              style={{ marginRight: 16 }}
+            >
+              <Ionicons name="log-out-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          ),
+        }}
+      />
     </Stack.Navigator>
   );
 }
@@ -208,7 +228,27 @@ function DriverBalanceStack() {
         headerTitleStyle: { fontFamily: 'Roboto' },
       }}
     >
-      <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} options={{ title: 'My Balance' }} />
+      <Stack.Screen
+        name="DriverBalance"
+        component={DriverBalanceScreen}
+        options={{
+          title: 'My Balance',
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  await firebaseAuth.signOut();
+                } catch (e) {
+                  console.error('Logout error:', e);
+                }
+              }}
+              style={{ marginRight: 16 }}
+            >
+              <Ionicons name="log-out-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          ),
+        }}
+      />
     </Stack.Navigator>
   );
 }
