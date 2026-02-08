@@ -14,7 +14,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import ActionModal from "../AlertModal/ActionModal";
 import BookingForm from "./BookingForm";
-import { bookingsService, variantsService } from "../../services/firebaseService";
+import { bookingsService, variantsService, appUsersService, getRoleSync } from "../../services/firebaseService";
 
 export default function AddBookingModal({
   visible,
@@ -38,6 +38,7 @@ export default function AddBookingModal({
     license_number: "",
     vehicle_id: null,
     vehicle_variant_id: null,
+    assigned_driver_id: null,
     gov_id_url: "",
     status: "pending", // Default status for new bookings
   });
@@ -52,6 +53,8 @@ export default function AddBookingModal({
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [drivers, setDrivers] = useState([]);
+  const [driverPickerVisible, setDriverPickerVisible] = useState(false);
 
   // Reset form when modal opens/closes
   useEffect(() => {
@@ -67,9 +70,16 @@ export default function AddBookingModal({
         license_number: "",
         vehicle_id: null,
         vehicle_variant_id: null,
+        assigned_driver_id: null,
         gov_id_url: "",
         status: "pending",
       });
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (visible && (getRoleSync() === "owner" || getRoleSync() === "admin")) {
+      appUsersService.listByOwner().then((list) => setDrivers((list || []).filter((u) => u.role === "driver"))).catch(() => setDrivers([]));
     }
   }, [visible]);
 
@@ -154,6 +164,7 @@ export default function AddBookingModal({
         license_number: newBooking.license_number,
         vehicle_id: newBooking.vehicle_id,
         vehicle_variant_id: newBooking.vehicle_variant_id,
+        assigned_driver_id: newBooking.assigned_driver_id || null,
         gov_id_url: newBooking.gov_id_url,
         status: newBooking.status,
       });
@@ -251,6 +262,38 @@ export default function AddBookingModal({
     </Modal>
   );
 
+  const renderDriverPicker = () => (
+    <Modal visible={driverPickerVisible} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.vehiclePickerContainer}>
+          <View style={styles.pickerHeader}>
+            <Text style={styles.pickerTitle}>Assign driver (optional)</Text>
+            <TouchableOpacity onPress={() => setDriverPickerVisible(false)}>
+              <Ionicons name="close" size={24} color="#374151" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={styles.vehiclePickerItem}
+            onPress={() => { setNewBooking(prev => ({ ...prev, assigned_driver_id: null })); setDriverPickerVisible(false); }}
+          >
+            <Text style={styles.vehiclePickerText}>None</Text>
+            {!newBooking.assigned_driver_id && <Ionicons name="checkmark" size={20} color="#3b82f6" />}
+          </TouchableOpacity>
+          {drivers.map((d) => (
+            <TouchableOpacity
+              key={d.id}
+              style={[styles.vehiclePickerItem, newBooking.assigned_driver_id === d.id && styles.vehiclePickerItemSelected]}
+              onPress={() => { setNewBooking(prev => ({ ...prev, assigned_driver_id: d.id })); setDriverPickerVisible(false); }}
+            >
+              <Text style={styles.vehiclePickerText}>{d.full_name || d.email}</Text>
+              {newBooking.assigned_driver_id === d.id && <Ionicons name="checkmark" size={20} color="#3b82f6" />}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    </Modal>
+  );
+
   // Don't render if modal is not visible
   if (!visible) return null;
 
@@ -313,14 +356,29 @@ export default function AddBookingModal({
                 styles={styles}
                 formatDate={formatDate}
                 setDatePickerVisible={setDatePickerVisible}
-                setVehiclePickerVisible={setVehiclePickerVisible} 
+                setVehiclePickerVisible={setVehiclePickerVisible}
                 setDateField={setDateField}
                 isEdit={false}
               />
+              {drivers.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: "#374151", marginBottom: 6 }}>Assign driver (optional)</Text>
+                  <TouchableOpacity
+                    style={[styles.input, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}
+                    onPress={() => setDriverPickerVisible(true)}
+                  >
+                    <Text style={{ color: newBooking.assigned_driver_id ? "#111" : "#9ca3af" }}>
+                      {newBooking.assigned_driver_id ? (drivers.find((d) => d.id === newBooking.assigned_driver_id)?.full_name || drivers.find((d) => d.id === newBooking.assigned_driver_id)?.email) : "None"}
+                    </Text>
+                    <Ionicons name="chevron-down" size={20} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+              )}
             </ScrollView>
 
             {/* Vehicle Picker */}
             {renderVehiclePicker()}
+            {renderDriverPicker()}
 
             {/* DATE PICKER */}
             {CalendarModalComponent && (

@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, Linking } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { firebaseAuth, debugConnectivity } from './services/firebaseService';
+import { firebaseAuth, debugConnectivity, getCurrentAppUser, ensureOwnerAppUser, setAuthCache } from './services/firebaseService';
 import { AuthProvider } from './services/AuthContext';
 
 // Import screens (ensure imports paths are correct)
@@ -22,6 +22,9 @@ import CashFlowScreen from './screens/CashFlowScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import LoginScreen from './screens/LoginScreen';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
+import UserManagementScreen from './screens/UserManagementScreen';
+import DriverBalanceScreen from './screens/DriverBalanceScreen';
+import SystemSettingsScreen from './screens/SystemSettingsScreen';
 
 export const navigationRef = createNavigationContainerRef();
 
@@ -167,6 +170,49 @@ function CalendarStack() {
   );
 }
 
+function UserManagementStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: '#000' },
+        headerTintColor: '#fff',
+        headerTitleStyle: { fontFamily: 'Roboto' },
+      }}
+    >
+      <Stack.Screen name="UserManagement" component={UserManagementScreen} options={{ title: 'User Management' }} />
+      <Stack.Screen name="SystemSettings" component={SystemSettingsScreen} options={{ title: 'System Settings' }} />
+    </Stack.Navigator>
+  );
+}
+
+function DriverScheduleStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: '#000' },
+        headerTintColor: '#fff',
+        headerTitleStyle: { fontFamily: 'Roboto' },
+      }}
+    >
+      <Stack.Screen name="DriverBookingsList" component={BookingsScreen} options={{ title: 'My Schedule' }} />
+    </Stack.Navigator>
+  );
+}
+
+function DriverBalanceStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: '#000' },
+        headerTintColor: '#fff',
+        headerTitleStyle: { fontFamily: 'Roboto' },
+      }}
+    >
+      <Stack.Screen name="DriverBalance" component={DriverBalanceScreen} options={{ title: 'My Balance' }} />
+    </Stack.Navigator>
+  );
+}
+
 function AuthNavigator() {
   return (
     <SafeAreaProvider>
@@ -185,24 +231,66 @@ function AuthNavigator() {
   );
 }
 
-function MainNavigator() {
+function MainNavigator({ role = 'owner' }) {
   const insets = useSafeAreaInsets();
+  const isDriver = role === 'driver';
+  const isOwner = role === 'owner';
+
+  const tabIcon = ({ route, focused, color, size }) => {
+    let iconName;
+    if (route.name === 'Dashboard') iconName = focused ? 'grid' : 'grid-outline';
+    else if (route.name === 'Bookings' || route.name === 'DriverSchedule') iconName = focused ? 'calendar' : 'calendar-outline';
+    else if (route.name === 'Vehicles') iconName = focused ? 'car' : 'car-outline';
+    else if (route.name === 'Reports') iconName = focused ? 'analytics' : 'analytics-outline';
+    else if (route.name === 'Calendar') iconName = focused ? 'today' : 'today-outline';
+    else if (route.name === 'CarOwners') iconName = focused ? 'people' : 'people-outline';
+    else if (route.name === 'UserManagement') iconName = focused ? 'person-add' : 'person-add-outline';
+    else if (route.name === 'DriverBalance') iconName = focused ? 'wallet' : 'wallet-outline';
+    return <Ionicons name={iconName || 'ellipse'} size={size} color={color} />;
+  };
+
+  const commonScreenOptions = {
+    headerShown: false,
+    title: '',
+    tabBarActiveTintColor: '#222',
+    tabBarInactiveTintColor: '#666',
+    tabBarStyle: {
+      backgroundColor: '#fff',
+      borderTopColor: '#eee',
+      paddingBottom: insets.bottom,
+      paddingTop: 8,
+      height: 60 + insets.bottom,
+      paddingHorizontal: 10,
+    },
+    headerStyle: { backgroundColor: '#000', height: 50 },
+    headerTintColor: '#fff',
+    headerTitleStyle: { fontFamily: 'Roboto' },
+    animationEnabled: false,
+  };
+
+  if (isDriver) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="light" backgroundColor="#222" />
+        <Tab.Navigator
+          screenOptions={({ route }) => ({
+            ...commonScreenOptions,
+            tabBarIcon: ({ focused, color, size }) => tabIcon({ route, focused, color, size }),
+          })}
+        >
+          <Tab.Screen name="DriverSchedule" component={DriverScheduleStack} options={{ title: 'My Schedule' }} />
+          <Tab.Screen name="DriverBalance" component={DriverBalanceStack} options={{ title: 'My Balance' }} />
+        </Tab.Navigator>
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>
       <StatusBar style="light" backgroundColor="#222" />
       <Tab.Navigator
         screenOptions={({ route }) => ({
-          tabBarIcon: ({ focused, color, size }) => {
-            let iconName;
-            if (route.name === 'Dashboard') iconName = focused ? 'grid' : 'grid-outline';
-            else if (route.name === 'Bookings') iconName = focused ? 'calendar' : 'calendar-outline';
-            else if (route.name === 'Vehicles') iconName = focused ? 'car' : 'car-outline';
-            else if (route.name === 'Reports') iconName = focused ? 'analytics' : 'analytics-outline';
-            else if (route.name === 'Calendar') iconName = focused ? 'today' : 'today-outline';
-            else if (route.name === 'CarOwners') iconName = focused ? 'people' : 'people-outline';
-            return <Ionicons name={iconName} size={size} color={color} />;
-          },
+          tabBarIcon: ({ focused, color, size }) => tabIcon({ route, focused, color, size }),
           tabBarActiveTintColor: '#222',
           tabBarInactiveTintColor: '#666',
           tabBarStyle: {
@@ -400,6 +488,14 @@ function MainNavigator() {
             }),
           }}
         />
+
+        {isOwner && (
+          <Tab.Screen
+            name="UserManagement"
+            component={UserManagementStack}
+            options={{ headerShown: false, title: 'Users' }}
+          />
+        )}
       </Tab.Navigator>
     </SafeAreaProvider>
   );
@@ -407,21 +503,56 @@ function MainNavigator() {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [appUser, setAppUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 1) Firebase Auth session handling
+  // 1) Firebase Auth + role (app_users)
   useEffect(() => {
     debugConnectivity().catch(() => {});
-    const currentUser = firebaseAuth.getCurrentUser();
-    setUser(currentUser ?? null);
-    setLoading(false);
+    let mounted = true;
 
-    const unsub = firebaseAuth.onAuthStateChange((user) => {
-      setUser(user ?? null);
+    const init = async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
+        setAppUser(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        await ensureOwnerAppUser();
+        const profile = await getCurrentAppUser();
+        if (!mounted) return;
+        if (profile?.status === 'disabled') {
+          await firebaseAuth.signOut();
+          setUser(null);
+          setAppUser(null);
+          setLoading(false);
+          return;
+        }
+        const role = profile?.role || 'owner';
+        const effectiveOwnerId = profile?.owner_uid || firebaseUser.uid;
+        setAuthCache(effectiveOwnerId, role);
+        setAppUser(profile);
+        setUser(firebaseUser);
+      } catch (e) {
+        if (mounted) setUser(firebaseUser);
+        setAppUser({ role: 'owner', owner_uid: firebaseUser?.uid, status: 'active' });
+        setAuthCache(firebaseUser?.uid, 'owner');
+      }
       setLoading(false);
-    });
+    };
 
-    return () => unsub();
+    const currentUser = firebaseAuth.getCurrentUser();
+    if (currentUser) init(currentUser); else setLoading(false);
+
+    const unsub = firebaseAuth.onAuthStateChange((firebaseUser) => {
+      if (firebaseUser) init(firebaseUser); else {
+        setUser(null);
+        setAppUser(null);
+        setLoading(false);
+      }
+    });
+    return () => { mounted = false; unsub(); };
   }, []);
 
   // 2) Deep link handling
@@ -445,11 +576,13 @@ export default function App() {
     );
   }
 
+  const role = appUser?.role || 'owner';
+
   return (
     <SafeAreaProvider>
-      <AuthProvider user={user}>
+      <AuthProvider user={user} appUser={appUser} role={role}>
         <NavigationContainer ref={navigationRef} linking={linking}>
-          {user ? <MainNavigator /> : <AuthNavigator />}
+          {user ? <MainNavigator role={role} /> : <AuthNavigator />}
         </NavigationContainer>
       </AuthProvider>
     </SafeAreaProvider>

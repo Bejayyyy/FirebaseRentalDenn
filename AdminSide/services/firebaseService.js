@@ -9,6 +9,7 @@ import {
   getDocs,
   getDoc,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -43,12 +44,46 @@ export const firebaseAuth = {
   onAuthStateChange: (callback) => onAuthStateChanged(auth, callback),
 };
 
-// ============ HELPERS ============
+// ============ APP USERS (roles: owner | admin | driver) ============
+export const getCurrentAppUser = async () => {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return null;
+  const snap = await getDoc(doc(db, "app_users", uid));
+  if (snap.exists()) return fromFirestore(snap);
+  return { id: uid, role: "owner", owner_uid: uid, status: "active", email: auth.currentUser?.email || "" };
+};
+
+export const ensureOwnerAppUser = async () => {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  const d = doc(db, "app_users", uid);
+  const snap = await getDoc(d);
+  if (snap.exists()) return;
+  await setDoc(d, {
+    email: auth.currentUser?.email || "",
+    role: "owner",
+    owner_uid: uid,
+    status: "active",
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
+  }, { merge: true });
+};
 const requireUserId = () => {
   const user = auth.currentUser;
   if (!user) throw new Error("User must be logged in");
   return user.uid;
 };
+
+// Role-based: tenant (owner) id and role cached by App after login
+let _effectiveOwnerId = null;
+let _role = "owner";
+export const setAuthCache = (effectiveOwnerId, role) => {
+  _effectiveOwnerId = effectiveOwnerId;
+  _role = role || "owner";
+};
+export const getEffectiveOwnerIdSync = () => _effectiveOwnerId;
+export const getRoleSync = () => _role;
+const requireOwnerId = () => _effectiveOwnerId || requireUserId();
 
 const toFirestore = (obj) => {
   if (!obj) return obj;
@@ -73,13 +108,13 @@ const fromFirestore = (docSnap) => {
 const fromFirestoreList = (snapshot) =>
   snapshot.docs.map((d) => fromFirestore(d));
 
-// ============ VEHICLES (user-scoped) ============
+// ============ VEHICLES (owner-scoped) ============
 export const vehiclesService = {
   list: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicles"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("created_at", "desc")
     );
     const snap = await getDocs(q);
@@ -87,47 +122,47 @@ export const vehiclesService = {
   },
 
   subscribe: (onData, onError) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicles"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("created_at", "desc")
     );
     return onSnapshot(q, (snap) => onData(fromFirestoreList(snap)), onError);
   },
 
   add: async (data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const ref = await addDoc(collection(db, "vehicles"), {
       ...toFirestore(data),
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return { id: ref.id };
   },
 
   update: async (id, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "vehicles", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Vehicle not found or access denied");
     }
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
   },
 
   delete: async (id) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "vehicles", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Vehicle not found or access denied");
     }
     // Delete associated variants first
     const vq = query(
       collection(db, "vehicle_variants"),
       where("vehicle_id", "==", id),
-      where("user_id", "==", userId)
+      where("user_id", "==", ownerId)
     );
     const vSnap = await getDocs(vq);
     const batch = writeBatch(db);
@@ -137,21 +172,21 @@ export const vehiclesService = {
   },
 
   getById: async (id) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const snap = await getDoc(doc(db, "vehicles", id));
     const v = fromFirestore(snap);
-    if (!v || v.user_id !== userId) return null;
+    if (!v || v.user_id !== ownerId) return null;
     return v;
   },
 };
 
-// ============ VEHICLE VARIANTS (user-scoped) ============
+// ============ VEHICLE VARIANTS (owner-scoped) ============
 export const variantsService = {
   list: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("color", "asc")
     );
     const snap = await getDocs(q);
@@ -159,32 +194,32 @@ export const variantsService = {
   },
 
   listByOwnerId: async (ownerId) => {
-    const userId = requireUserId();
+    const tenantId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
       where("owner_id", "==", ownerId),
-      where("user_id", "==", userId)
+      where("user_id", "==", tenantId)
     );
     const snap = await getDocs(q);
     return fromFirestoreList(snap);
   },
 
   listByVehicleId: async (vehicleId) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
       where("vehicle_id", "==", vehicleId),
-      where("user_id", "==", userId)
+      where("user_id", "==", ownerId)
     );
     const snap = await getDocs(q);
     return fromFirestoreList(snap);
   },
 
   listAvailable: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("available_quantity", ">", 0)
     );
     const snap = await getDocs(q);
@@ -192,10 +227,10 @@ export const variantsService = {
   },
 
   listWithVehicles: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
-      where("user_id", "==", userId)
+      where("user_id", "==", ownerId)
     );
     const snap = await getDocs(q);
     const variants = fromFirestoreList(snap);
@@ -207,10 +242,10 @@ export const variantsService = {
 
   listAvailableWithVehicles: async () => {
     const variants = await (async () => {
-      const userId = requireUserId();
+      const ownerId = requireOwnerId();
       const q = query(
         collection(db, "vehicle_variants"),
-        where("user_id", "==", userId),
+        where("user_id", "==", ownerId),
         where("available_quantity", ">", 0)
       );
       const snap = await getDocs(q);
@@ -226,41 +261,41 @@ export const variantsService = {
   },
 
   subscribe: (onData, onError) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("color", "asc")
     );
     return onSnapshot(q, (snap) => onData(fromFirestoreList(snap)), onError);
   },
 
   add: async (data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const ref = await addDoc(collection(db, "vehicle_variants"), {
       ...toFirestore(data),
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return { id: ref.id };
   },
 
   update: async (id, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "vehicle_variants", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Variant not found or access denied");
     }
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
   },
 
   deleteByVehicleId: async (vehicleId) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "vehicle_variants"),
       where("vehicle_id", "==", vehicleId),
-      where("user_id", "==", userId)
+      where("user_id", "==", ownerId)
     );
     const snap = await getDocs(q);
     const batch = writeBatch(db);
@@ -278,8 +313,8 @@ export const variantsService = {
     const snap = await getDoc(d);
     if (!snap.exists()) throw new Error("Variant not found");
     const v = snap.data();
-    const userId = requireUserId();
-    if (v.user_id !== userId) throw new Error("Access denied");
+    const ownerId = requireOwnerId();
+    if (v.user_id !== ownerId) throw new Error("Access denied");
     const avail = (v.available_quantity ?? 0) + change;
     const total = v.total_quantity ?? 1;
     await updateDoc(d, {
@@ -289,7 +324,7 @@ export const variantsService = {
   },
 };
 
-// ============ BOOKINGS (user-scoped) ============
+// ============ BOOKINGS (owner-scoped; driver sees only assigned) ============
 const getVehicleById = async (id) => {
   if (!id) return null;
   const snap = await getDoc(doc(db, "vehicles", id));
@@ -303,51 +338,57 @@ const getVariantById = async (id) => {
 
 export const bookingsService = {
   list: async () => {
-    const userId = requireUserId();
-    const q = query(
-      collection(db, "bookings"),
-      where("user_id", "==", userId),
-      orderBy("created_at", "desc")
-    );
+    const ownerId = requireOwnerId();
+    const isDriver = getRoleSync() === "driver";
+    const constraints = [
+      where("user_id", "==", ownerId),
+      orderBy("created_at", "desc"),
+    ];
+    if (isDriver) constraints.unshift(where("assigned_driver_id", "==", requireUserId()));
+    const q = query(collection(db, "bookings"), ...constraints);
     const snap = await getDocs(q);
     return fromFirestoreList(snap);
   },
 
   subscribe: (onData, onError) => {
-    const userId = requireUserId();
-    const q = query(
-      collection(db, "bookings"),
-      where("user_id", "==", userId),
-      orderBy("created_at", "desc")
-    );
+    const ownerId = requireOwnerId();
+    const isDriver = getRoleSync() === "driver";
+    const constraints = [
+      where("user_id", "==", ownerId),
+      orderBy("created_at", "desc"),
+    ];
+    if (isDriver) constraints.unshift(where("assigned_driver_id", "==", requireUserId()));
+    const q = query(collection(db, "bookings"), ...constraints);
     return onSnapshot(q, (snap) => onData(fromFirestoreList(snap)), onError);
   },
 
   add: async (data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const ref = await addDoc(collection(db, "bookings"), {
       ...toFirestore(data),
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return { id: ref.id };
   },
 
   update: async (id, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
+    const myUid = requireUserId();
     const d = doc(db, "bookings", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
-      throw new Error("Booking not found or access denied");
-    }
+    if (!snap.exists()) throw new Error("Booking not found");
+    const b = snap.data();
+    if (b.user_id !== ownerId) throw new Error("Access denied");
+    if (getRoleSync() === "driver" && b.assigned_driver_id !== myUid) throw new Error("Access denied");
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
   },
 
   delete: async (id) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "bookings", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Booking not found or access denied");
     }
     await deleteDoc(d);
@@ -357,8 +398,9 @@ export const bookingsService = {
     const snap = await getDoc(doc(db, "bookings", id));
     const b = fromFirestore(snap);
     if (!b) return null;
-    const userId = requireUserId();
-    if (b.user_id !== userId) return null;
+    const ownerId = requireOwnerId();
+    if (b.user_id !== ownerId) return null;
+    if (getRoleSync() === "driver" && b.assigned_driver_id !== requireUserId()) return null;
     return b;
   },
 
@@ -384,13 +426,13 @@ export const bookingsService = {
   },
 };
 
-// ============ CAR OWNERS (user-scoped) ============
+// ============ CAR OWNERS (owner-scoped) ============
 export const carOwnersService = {
   list: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "car_owners"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("status", "==", "active"),
       orderBy("name", "asc")
     );
@@ -399,10 +441,10 @@ export const carOwnersService = {
   },
 
   listAll: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "car_owners"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("created_at", "desc")
     );
     const snap = await getDocs(q);
@@ -410,40 +452,40 @@ export const carOwnersService = {
   },
 
   subscribe: (onData, onError) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "car_owners"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("name", "asc")
     );
     return onSnapshot(q, (snap) => onData(fromFirestoreList(snap)), onError);
   },
 
   add: async (data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const ref = await addDoc(collection(db, "car_owners"), {
       ...toFirestore(data),
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return { id: ref.id };
   },
 
   update: async (id, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "car_owners", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Car owner not found or access denied");
     }
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
   },
 
   delete: async (id) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "car_owners", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Car owner not found or access denied");
     }
     await deleteDoc(d);
@@ -453,19 +495,19 @@ export const carOwnersService = {
     const snap = await getDoc(doc(db, "car_owners", id));
     const o = fromFirestore(snap);
     if (!o) return null;
-    const userId = requireUserId();
-    if (o.user_id !== userId) return null;
+    const ownerId = requireOwnerId();
+    if (o.user_id !== ownerId) return null;
     return o;
   },
 };
 
-// ============ NOTIFICATIONS (user-scoped) ============
+// ============ NOTIFICATIONS (owner-scoped) ============
 export const notificationsService = {
   list: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "notifications"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("created_at", "desc")
     );
     const snap = await getDocs(q);
@@ -473,10 +515,10 @@ export const notificationsService = {
   },
 
   listUnread: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "notifications"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("dismissed", "==", false),
       orderBy("created_at", "desc")
     );
@@ -485,40 +527,40 @@ export const notificationsService = {
   },
 
   subscribe: (onData, onError) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "notifications"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       orderBy("created_at", "desc")
     );
     return onSnapshot(q, (snap) => onData(fromFirestoreList(snap)), onError);
   },
 
   add: async (data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const ref = await addDoc(collection(db, "notifications"), {
       ...toFirestore(data),
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return { id: ref.id };
   },
 
   update: async (id, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "notifications", id);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Notification not found or access denied");
     }
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
   },
 
   listByBookingId: async (bookingId) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "notifications"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("booking_id", "==", bookingId),
       where("dismissed", "==", false)
     );
@@ -527,10 +569,10 @@ export const notificationsService = {
   },
 
   markAllDismissed: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "notifications"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("dismissed", "==", false)
     );
     const snap = await getDocs(q);
@@ -540,10 +582,10 @@ export const notificationsService = {
   },
 
   markAllRead: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "notifications"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("read", "==", false)
     );
     const snap = await getDocs(q);
@@ -553,13 +595,13 @@ export const notificationsService = {
   },
 };
 
-// ============ WEBSITE CONTENT (user-scoped) ============
+// ============ WEBSITE CONTENT (owner-scoped) ============
 export const websiteContentService = {
   getBySection: async (section) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "website_content"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("section", "==", section)
     );
     const snap = await getDocs(q);
@@ -568,15 +610,15 @@ export const websiteContentService = {
   },
 
   upsert: async (section, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "website_content"),
-      where("user_id", "==", userId),
+      where("user_id", "==", ownerId),
       where("section", "==", section)
     );
     const snap = await getDocs(q);
     const existing = snap.docs[0];
-    const payload = { ...data, section, user_id: userId, updated_at: serverTimestamp() };
+    const payload = { ...data, section, user_id: ownerId, updated_at: serverTimestamp() };
     if (existing) {
       await updateDoc(existing.ref, payload);
       return { id: existing.id };
@@ -589,23 +631,23 @@ export const websiteContentService = {
   },
 };
 
-// ============ GALLERY (user-scoped) ============
+// ============ GALLERY (owner-scoped) ============
 export const galleryService = {
   list: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "gallery"),
-      where("user_id", "==", userId)
+      where("user_id", "==", ownerId)
     );
     const snap = await getDocs(q);
     return fromFirestoreList(snap);
   },
 
   getImages: async (galleryId) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const gRef = doc(db, "gallery", galleryId);
     const gSnap = await getDoc(gRef);
-    if (!gSnap.exists() || gSnap.data().user_id !== userId) return [];
+    if (!gSnap.exists() || gSnap.data().user_id !== ownerId) return [];
     const q = query(
       collection(db, "gallery_images"),
       where("gallery_id", "==", galleryId),
@@ -616,51 +658,51 @@ export const galleryService = {
   },
 
   addImage: async (galleryId, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const gRef = doc(db, "gallery", galleryId);
     const gSnap = await getDoc(gRef);
-    if (!gSnap.exists() || gSnap.data().user_id !== userId) {
+    if (!gSnap.exists() || gSnap.data().user_id !== ownerId) {
       throw new Error("Gallery not found or access denied");
     }
     const ref = await addDoc(collection(db, "gallery_images"), {
       ...toFirestore(data),
       gallery_id: galleryId,
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return { id: ref.id };
   },
 
   deleteImage: async (imageId) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "gallery_images", imageId);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Image not found or access denied");
     }
     await deleteDoc(d);
   },
 
   updateImage: async (imageId, data) => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const d = doc(db, "gallery_images", imageId);
     const snap = await getDoc(d);
-    if (!snap.exists() || snap.data().user_id !== userId) {
+    if (!snap.exists() || snap.data().user_id !== ownerId) {
       throw new Error("Image not found or access denied");
     }
     await updateDoc(d, { ...data, updated_at: serverTimestamp() });
   },
 
   getOrCreateGallery: async () => {
-    const userId = requireUserId();
+    const ownerId = requireOwnerId();
     const q = query(
       collection(db, "gallery"),
-      where("user_id", "==", userId)
+      where("user_id", "==", ownerId)
     );
     const snap = await getDocs(q);
     if (snap.docs.length > 0) return snap.docs[0].id;
     const ref = await addDoc(collection(db, "gallery"), {
-      user_id: userId,
+      user_id: ownerId,
       created_at: serverTimestamp(),
     });
     return ref.id;
@@ -680,24 +722,24 @@ export const galleryService = {
 // ============ STORAGE ============
 export const storageService = {
   uploadGovId: async (fileName, blob) => {
-    const userId = requireUserId();
-    const path = `gov_ids/${userId}/${fileName}`;
+    const ownerId = requireOwnerId();
+    const path = `gov_ids/${ownerId}/${fileName}`;
     const storageRef = ref(storage, path);
     await uploadBytes(storageRef, blob);
     return getDownloadURL(storageRef);
   },
 
   uploadGalleryImage: async (fileName, blob) => {
-    const userId = requireUserId();
-    const path = `gallery/${userId}/${fileName}`;
+    const ownerId = requireOwnerId();
+    const path = `gallery/${ownerId}/${fileName}`;
     const storageRef = ref(storage, path);
     await uploadBytes(storageRef, blob);
     return getDownloadURL(storageRef);
   },
 
   uploadVehicleImage: async (path, blob) => {
-    const userId = requireUserId();
-    const fullPath = `vehicle-images/${userId}/${path}`;
+    const ownerId = requireOwnerId();
+    const fullPath = `vehicle-images/${ownerId}/${path}`;
     const storageRef = ref(storage, fullPath);
     await uploadBytes(storageRef, blob);
     return getDownloadURL(storageRef);
@@ -706,6 +748,57 @@ export const storageService = {
   getPublicUrl: (path) => {
     const storageRef = ref(storage, path);
     return getDownloadURL(storageRef);
+  },
+};
+
+// ============ APP USERS (Owner: list/edit; create via Cloud Function) ============
+export const appUsersService = {
+  listByOwner: async () => {
+    const ownerId = requireOwnerId();
+    const role = getRoleSync();
+    if (role !== "owner" && role !== "admin") throw new Error("Only Owner or Admin can list users");
+    const q = query(
+      collection(db, "app_users"),
+      where("owner_uid", "==", ownerId),
+      orderBy("created_at", "desc")
+    );
+    const snap = await getDocs(q);
+    return fromFirestoreList(snap);
+  },
+
+  getByUid: async (uid) => {
+    const snap = await getDoc(doc(db, "app_users", uid));
+    return fromFirestore(snap);
+  },
+
+  update: async (uid, data) => {
+    const ownerId = requireOwnerId();
+    if (getRoleSync() !== "owner") throw new Error("Only Owner can update users");
+    const d = doc(db, "app_users", uid);
+    const snap = await getDoc(d);
+    if (!snap.exists()) throw new Error("User not found");
+    if (snap.data().owner_uid !== ownerId) throw new Error("Access denied");
+    await updateDoc(d, { ...data, updated_at: serverTimestamp() });
+  },
+};
+
+// ============ SYSTEM SETTINGS (Owner only; fuel price, delay fee) ============
+export const systemSettingsService = {
+  get: async () => {
+    const ownerId = requireOwnerId();
+    const snap = await getDoc(doc(db, "system_settings", ownerId));
+    if (!snap.exists()) return { fuel_price_per_liter: 0, delay_fee_per_hour: 0 };
+    return fromFirestore(snap);
+  },
+
+  upsert: async (data) => {
+    const ownerId = requireOwnerId();
+    if (getRoleSync() !== "owner") throw new Error("Only Owner can update system settings");
+    await setDoc(
+      doc(db, "system_settings", ownerId),
+      { ...data, updated_at: serverTimestamp() },
+      { merge: true }
+    );
   },
 };
 

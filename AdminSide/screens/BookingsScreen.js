@@ -17,7 +17,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path, Circle, Line, Stop, LinearGradient, Defs } from 'react-native-svg';
 import { Calendar } from 'react-native-calendars';
-import { bookingsService, variantsService, firebaseAuth } from '../services/firebaseService';
+import { bookingsService, variantsService, firebaseAuth, getRoleSync } from '../services/firebaseService';
+import DriverStatusModal from '../components/BookingScreen/DriverStatusModal';
 import { Dropdown } from 'react-native-element-dropdown';
 import { Button } from 'react-native';
 import BookingForm from '../components/BookingScreen/BookingForm';
@@ -75,6 +76,7 @@ export default function BookingsScreen({ route, navigation }) {
     type: "success", // or "error"
     message: "",
   });
+  const [driverStatusModal, setDriverStatusModal] = useState({ visible: false, bookingId: null, booking: null, newStatus: null });
   const handleOpenCalendar = (field) => {
     setDateField(field);
     setCalendarModalVisible(true);
@@ -493,6 +495,12 @@ const showConfirmation = (title, message, onConfirm) => {
 };
 
   const updateBookingStatus = async (bookingId, newStatus) => {
+    const role = getRoleSync();
+    const booking = bookings.find((b) => b.id === bookingId);
+    if (role === 'driver' && (newStatus === 'ongoing' || newStatus === 'completed')) {
+      setDriverStatusModal({ visible: true, bookingId, booking: booking || null, newStatus });
+      return;
+    }
     showConfirmation(
       'Update Status',
       `Are you sure you want to change the status to "${newStatus}"?`,
@@ -519,6 +527,20 @@ const showConfirmation = (title, message, onConfirm) => {
         }
       }
     );
+  };
+
+  const handleDriverStatusSubmit = async (payload) => {
+    const { bookingId } = driverStatusModal;
+    try {
+      await bookingsService.update(bookingId, payload);
+      setBookings(prev => prev.map(b => (b.id === bookingId ? { ...b, ...payload } : b)));
+      if (selectedBooking?.id === bookingId) setSelectedBooking(prev => ({ ...prev, ...payload }));
+      if (payload.status === 'completed') await fetchAvailableVehicles();
+      setFeedbackModal({ visible: true, type: 'success', message: 'Status updated successfully.' });
+    } catch (e) {
+      setFeedbackModal({ visible: true, type: 'error', message: e?.message || 'Update failed.' });
+    }
+    setDriverStatusModal({ visible: false, bookingId: null, booking: null, newStatus: null });
   };
 
   const updateBooking = async (updatedBooking) => {      
@@ -940,7 +962,7 @@ const showConfirmation = (title, message, onConfirm) => {
   };
 
   const StatusDropdown = () => {
-    const statusOptions = ['All', 'pending', 'confirmed', 'completed', 'cancelled', 'declined'];
+    const statusOptions = ['All', 'pending', 'confirmed', 'ongoing', 'completed', 'cancelled', 'declined'];
     
     return (
       <EnhancedDropdown 
@@ -1497,7 +1519,13 @@ const showConfirmation = (title, message, onConfirm) => {
   onConfirm={() => setFeedbackModal({ visible: false, type: "success", message: "" })}
 />
 
-
+<DriverStatusModal
+  visible={driverStatusModal.visible}
+  onClose={() => setDriverStatusModal({ visible: false, bookingId: null, booking: null, newStatus: null })}
+  onSubmit={handleDriverStatusSubmit}
+  mode={driverStatusModal.newStatus}
+  booking={driverStatusModal.booking}
+/>
 
       <EditBookingModal
       visible={editModalVisible}

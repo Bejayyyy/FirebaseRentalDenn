@@ -50,6 +50,7 @@ const NotificationBell = ({ notifications, onPress }) => {
     inputRange: [-1, 1],
     outputRange: ['-15deg', '15deg'],
   });
+  console.log("Current user:", firebaseAuth.currentUser);
 
   return (
     <TouchableOpacity style={styles.notificationBell} onPress={onPress}>
