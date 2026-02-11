@@ -1187,8 +1187,8 @@ const showConfirmation = (title, message, onConfirm) => {
                 },
               }}
             theme={{
-              backgroundColor: "transparent",
-              calendarBackground: "transparent",
+              backgroundColor: "#ffffff",
+              calendarBackground: "#ffffff",
               textSectionTitleColor: "#374151",
               selectedDayBackgroundColor: "#3b82f6",
               selectedDayTextColor: "#ffffff",
@@ -1218,7 +1218,7 @@ const showConfirmation = (title, message, onConfirm) => {
             disableArrowLeft={false}
             disableArrowRight={false}
             disableAllTouchEventsForDisabledDays={true}
-            eadereader={(date) => {
+            renderHeader={(date) => {
               const monthNames = [
                 'January', 'February', 'March', 'April', 'May', 'June',
                 'July', 'August', 'September', 'October', 'November', 'December'
@@ -2075,6 +2075,67 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginTop: 4,
     textAlign: 'center',
+  },
+  calendarModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  calendarModalContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    maxWidth: 360,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  calendarModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  calendarModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  calendarCloseButton: {
+    padding: 4,
+  },
+  dateRestrictionInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#eff6ff',
+    borderRadius: 8,
+  },
+  dateRestrictionText: {
+    fontSize: 13,
+    color: '#1e40af',
+  },
+  calendarFooter: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  selectedDateText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
   },
   modalOverlay: {
     flex: 1,

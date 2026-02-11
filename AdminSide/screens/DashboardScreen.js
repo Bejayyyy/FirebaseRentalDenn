@@ -249,24 +249,22 @@ const WebsiteContentModal = ({ visible, onClose, section, onSave, setActionModal
     try {
       const data = await websiteContentService.getBySection(section);
 
-      if (data && data.content) {
-        // Add safety checks for each section type
+      if (data) {
+        if (!data.content || typeof data.content !== 'object') {
+          data = { ...data, content: {} };
+        }
         if (section === 'about_us') {
-          if (!data.content.stats) {
-            data.content.stats = { happyCustomers: 0, dailyBookings: 0 };
-          }
+          if (!data.content.stats) data.content.stats = { happyCustomers: 0, dailyBookings: 0 };
         } else if (section === 'how_it_works') {
-          if (!data.content.steps || !Array.isArray(data.content.steps)) {
-            data.content.steps = [];
-          }
+          if (!data.content.steps || !Array.isArray(data.content.steps)) data.content.steps = [];
         } else if (section === 'faqs') {
           if (!data.content.questions || !Array.isArray(data.content.questions)) {
-            data.content.questions = [];
+            data.content.questions = [{ question: '', answer: '' }];
           }
         }
         setContent(data);
       } else {
-        throw new Error('Invalid data structure');
+        setContent({ id: null, content: section === 'faqs' ? { questions: [{ question: '', answer: '' }], title: 'FAQs', subtitle: '' } : section === 'about_us' ? { stats: { happyCustomers: 0, dailyBookings: 0 } } : section === 'how_it_works' ? { steps: [] } : {} });
       }
     } catch (err) {
       console.error('Error fetching content:', err);
